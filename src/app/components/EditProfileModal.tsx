@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ModalOverlay } from "@/app/components/ModalOverlay";
 import { useIctStore } from "@/contexts/IctStore";
 import { inputClass } from "@/lib/styles";
 import type { Candidate, SessionUser } from "@/types/ict";
@@ -60,8 +61,8 @@ function EditProfileForm({ session, candidate, onClose }: EditProfileFormProps) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 md:p-8 border border-gray-100 relative animate-scale-up">
+    <ModalOverlay onBackdropClick={onClose}>
+      <div className="bg-white rounded-3xl shadow-2xl w-full p-6 md:p-8 border border-gray-100 relative animate-scale-up">
         <button
           type="button"
           onClick={onClose}
@@ -188,7 +189,7 @@ function EditProfileForm({ session, candidate, onClose }: EditProfileFormProps) 
           </div>
         )}
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 

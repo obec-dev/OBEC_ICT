@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Candidate, DistrictStat, School, SchoolTotals } from "@/types/ict";
+import type { Candidate, DistrictStat, ExamProgress, School, SchoolTotals } from "@/types/ict";
 
 type SchoolRow = {
   school_id: string;
@@ -457,6 +457,7 @@ export async function upsertWatchProgressToDb(input: {
 
 export async function upsertExamProgressToDb(input: {
   profile_id: string;
+  project_id?: string;
   answers: Record<string, string>;
   status: "draft" | "submitted";
 }) {
@@ -467,10 +468,48 @@ export async function upsertExamProgressToDb(input: {
     status: input.status,
     updated_at: new Date().toISOString(),
   };
+  if (input.project_id) {
+    payload.project_id = input.project_id;
+  }
   if (input.status === "submitted") {
     payload.submitted_at = new Date().toISOString();
   }
-  const { error } = await supabase.from("exam_progress").upsert(payload, { onConflict: "profile_id" });
+
+  // Prefer per-project uniqueness; fall back to legacy profile_id-only schema.
+  const conflictTarget = input.project_id ? "profile_id,project_id" : "profile_id";
+  let { error } = await supabase.from("exam_progress").upsert(payload, { onConflict: conflictTarget });
+
+  if (error && input.project_id && /conflict|constraint|unique/i.test(error.message)) {
+    ({ error } = await supabase.from("exam_progress").upsert(payload, { onConflict: "profile_id" }));
+  }
+
   if (error) throw new Error(error.message);
+}
+
+export async function fetchExamProgressByProfiles(
+  profileIds: string[],
+  projectId?: string
+): Promise<ExamProgress[]> {
+  if (profileIds.length === 0) return [];
+  const supabase = createClient();
+  let query = supabase
+    .from("exam_progress")
+    .select("profile_id, project_id, answers, status, score, passed, graded_at, updated_at")
+    .in("profile_id", profileIds);
+  if (projectId) {
+    query = query.or(`project_id.eq.${projectId},project_id.is.null`);
+  }
+  const { data, error } = await query;
+  if (error || !data) return [];
+  return data.map((row) => ({
+    candidate_id: String(row.profile_id),
+    project_id: row.project_id ? String(row.project_id) : undefined,
+    answers: (row.answers as Record<string, string>) || {},
+    status: row.status === "submitted" ? ("submitted" as const) : ("draft" as const),
+    score: row.score != null ? Number(row.score) : undefined,
+    passed: typeof row.passed === "boolean" ? row.passed : undefined,
+    graded_at: row.graded_at ? String(row.graded_at) : undefined,
+    updated_at: row.updated_at ? String(row.updated_at) : new Date().toISOString(),
+  }));
 }
 

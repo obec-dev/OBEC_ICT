@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ModalOverlay } from "@/app/components/ModalOverlay";
 
 type UnsavedLeaveGuardProps = {
   isDirty: boolean;
@@ -114,8 +115,8 @@ export function UnsavedLeaveGuard({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] bg-black/45 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl p-7 max-w-md w-full shadow-2xl border border-gray-100">
+    <ModalOverlay zIndexClass="z-[200]" onBackdropClick={handleCancel}>
+      <div className="bg-white rounded-2xl p-7 shadow-2xl border border-gray-100 mx-auto max-w-md">
         <h3 className="text-xl font-bold text-[var(--primary-blue)] mb-3">{title}</h3>
         <p className="text-sm text-gray-600 leading-relaxed mb-6">{description}</p>
         <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
@@ -145,6 +146,6 @@ export function UnsavedLeaveGuard({
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

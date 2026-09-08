@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS projects (
   id text PRIMARY KEY, -- Project ID e.g. 'ict-talent-2026'
   name text NOT NULL,
   description text,
+  is_active boolean DEFAULT true NOT NULL, -- Master switch: inactive hides all activities
+  cover_url text, -- Optional banner/thumbnail for homepage carousel
   reg_start timestamp with time zone,
   reg_end timestamp with time zone,
   reg_enabled boolean DEFAULT true,
@@ -90,6 +92,14 @@ BEGIN
 
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'max_score') THEN
     ALTER TABLE projects ADD COLUMN max_score integer DEFAULT 5;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'is_active') THEN
+    ALTER TABLE projects ADD COLUMN is_active boolean DEFAULT true NOT NULL;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'projects' AND column_name = 'cover_url') THEN
+    ALTER TABLE projects ADD COLUMN cover_url text;
   END IF;
 
   -- Check and add new columns to watch_progress and exam_progress

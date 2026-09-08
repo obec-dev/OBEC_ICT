@@ -5,38 +5,34 @@ import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
 import { adminGetSettings, adminSaveSettings } from "@/lib/supabase/admin";
-import {
-  datetimeLocalToIso,
-  isoToDatetimeLocal,
-  parseSiteSettings,
-} from "@/lib/siteSettings";
+import { parseSiteSettings } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
 
 function ConfigContent() {
   const { adminToken } = useIctStore();
   const [siteName, setSiteName] = useState("");
-  const [registrationOpen, setRegistrationOpen] = useState(true);
   const [announce, setAnnounce] = useState("");
-  const [registrationStart, setRegistrationStart] = useState("");
-  const [registrationEnd, setRegistrationEnd] = useState("");
-  const [examStart, setExamStart] = useState("");
-  const [examEnd, setExamEnd] = useState("");
+  const [heroBadge, setHeroBadge] = useState("");
+  const [heroLine1, setHeroLine1] = useState("");
+  const [heroLine2, setHeroLine2] = useState("");
+  const [heroDescription, setHeroDescription] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [rawSettings, setRawSettings] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
     if (!adminToken) return;
     void adminGetSettings(adminToken)
       .then((raw) => {
+        setRawSettings(raw);
         const settings = parseSiteSettings(raw);
         setSiteName(settings.site_name);
-        setRegistrationOpen(settings.registration_open);
         setAnnounce(settings.login_announce_message);
-        setRegistrationStart(isoToDatetimeLocal(settings.registration_start));
-        setRegistrationEnd(isoToDatetimeLocal(settings.registration_end));
-        setExamStart(isoToDatetimeLocal(settings.exam_start));
-        setExamEnd(isoToDatetimeLocal(settings.exam_end));
+        setHeroBadge(settings.hero_badge);
+        setHeroLine1(settings.hero_title_line1);
+        setHeroLine2(settings.hero_title_line2);
+        setHeroDescription(settings.hero_description);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "โหลดตั้งค่าไม่สำเร็จ"))
       .finally(() => setLoading(false));
@@ -47,34 +43,20 @@ function ConfigContent() {
     setError("");
     setMessage("");
 
-    const regStartIso = datetimeLocalToIso(registrationStart);
-    const regEndIso = datetimeLocalToIso(registrationEnd);
-    const examStartIso = datetimeLocalToIso(examStart);
-    const examEndIso = datetimeLocalToIso(examEnd);
-
-    if (regStartIso && regEndIso && new Date(regStartIso) > new Date(regEndIso)) {
-      setError("ช่วงลงทะเบียน: วันเริ่มต้องไม่หลังวันสิ้นสุด");
-      return;
-    }
-    if (examStartIso && examEndIso && new Date(examStartIso) > new Date(examEndIso)) {
-      setError("ช่วงสอบ: วันเริ่มต้องไม่หลังวันสิ้นสุด");
-      return;
-    }
-
     const result = await adminSaveSettings(adminToken, {
+      ...rawSettings,
       site_name: siteName,
-      registration_open: registrationOpen,
       login_announce_message: announce,
-      registration_start: regStartIso,
-      registration_end: regEndIso,
-      exam_start: examStartIso,
-      exam_end: examEndIso,
+      hero_badge: heroBadge,
+      hero_title_line1: heroLine1,
+      hero_title_line2: heroLine2,
+      hero_description: heroDescription,
     });
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    setMessage("บันทึกการตั้งค่าช่วงเวลาแล้ว");
+    setMessage("บันทึกการตั้งค่าเว็บไซต์แล้ว");
   };
 
   return (
@@ -82,22 +64,18 @@ function ConfigContent() {
       <AdminNav />
       <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">ตั้งค่าเว็บไซต์</h1>
       <p className="text-gray-500 mb-6">
-        กำหนดชื่อระบบ ข้อความประกาศ และช่วงเปิด-ปิดของการลงทะเบียน / สอบ (เว้นว่าง = ไม่จำกัดด้านนั้น)
+        กำหนดชื่อระบบ ข้อความประกาศ และข้อความ Hero หน้าแรก · กำหนดการลงทะเบียน/สอบจัดการที่เมนูโครงการ
       </p>
 
       {loading ? (
         <p className="text-gray-500">กำลังโหลด...</p>
       ) : (
         <div className="space-y-6">
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 mb-6 text-sm text-blue-900">
-            <h3 className="font-bold flex items-center gap-2 mb-1">
-              <span>📌 หมายเหตุการตั้งค่ากำหนดการ:</span>
-            </h3>
+          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 text-sm text-blue-900">
             <p className="text-xs text-blue-800 leading-relaxed">
-              วันเปิด-ปิดลงทะเบียนและวันสอบได้รับการจัดสรรแยกเป็นรายวิชา/โครงการแล้วในระบบใหม่
-              ท่านสามารถจัดการกำหนดการเปิด-ปิดแยกรายวิชาได้ที่เมนู{" "}
+              ช่วงเปิด-ปิดลงทะเบียนและสอบ ตั้งค่าได้ที่{" "}
               <a href="/admin/projects" className="underline font-bold text-[var(--primary-blue)]">
-                “จัดการรายวิชา/โครงการ”
+                จัดการโครงการ & ข้อสอบ
               </a>
             </p>
           </div>
@@ -120,6 +98,47 @@ function ConfigContent() {
             </div>
           </div>
 
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+            <h2 className="font-bold text-[var(--primary-blue)]">Hero หน้าแรก (Landing)</h2>
+            <div>
+              <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                Hero Badge / Title Line 1 (แถบแดง)
+              </label>
+              <input
+                className={inputClass}
+                value={heroBadge}
+                onChange={(e) => setHeroBadge(e.target.value)}
+                placeholder="คัดเลือกตัวแทน ICT Talent ประจำโรงเรียน"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">Hero Title Line 1</label>
+              <input
+                className={inputClass}
+                value={heroLine1}
+                onChange={(e) => setHeroLine1(e.target.value)}
+                placeholder="ตัวแทน ICT Talent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">Hero Title Line 2</label>
+              <input
+                className={inputClass}
+                value={heroLine2}
+                onChange={(e) => setHeroLine2(e.target.value)}
+                placeholder="ประจำโรงเรียน"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">Hero Description</label>
+              <textarea
+                className={`${inputClass} min-h-[100px]`}
+                value={heroDescription}
+                onChange={(e) => setHeroDescription(e.target.value)}
+              />
+            </div>
+          </div>
+
           {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
           {message && <p className="text-sm text-[var(--accent-green)]">{message}</p>}
           <button
@@ -127,7 +146,7 @@ function ConfigContent() {
             onClick={() => void save()}
             className="rounded-full bg-[var(--primary-blue)] text-white px-6 py-3 font-bold"
           >
-            บันทึกการตั้งค่าทั่วไป
+            บันทึกการตั้งค่า
           </button>
         </div>
       )}

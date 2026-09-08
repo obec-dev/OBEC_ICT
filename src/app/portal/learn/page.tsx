@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
+import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { useIctStore } from "@/contexts/IctStore";
+import { getSiteProject } from "@/lib/siteSettings";
 import type { ProjectVideo } from "@/types/ict";
 
 declare global {
@@ -35,12 +37,10 @@ function LearnContent() {
     isAdmin,
     projects,
     videos,
-    activeProjectId,
-    setActiveProjectId,
   } = useIctStore();
 
-  const currentProject = projects.find((p) => p.id === activeProjectId) || projects[0];
-  const projectVideos = videos.filter((v) => v.project_id === (currentProject?.id || activeProjectId));
+  const currentProject = useMemo(() => getSiteProject(projects), [projects]);
+  const projectVideos = videos.filter((v) => v.project_id === currentProject?.id);
 
   const [selectedVideoId, setSelectedVideoId] = useState<string>("");
 
@@ -83,17 +83,15 @@ function LearnContent() {
 
   // Stable refs for save and end callbacks (avoids effect re-runs)
   const ytVideoIdRef = useRef(ytVideoId);
-  const activeProjectIdRef = useRef(activeProjectId);
   const currentProjectIdRef = useRef(currentProject?.id);
   ytVideoIdRef.current = ytVideoId;
-  activeProjectIdRef.current = activeProjectId;
   currentProjectIdRef.current = currentProject?.id;
 
   const onVideoStarted = useRef(async () => {
     setSaving(true);
     const result = await saveWatchProgress({
       video_id: ytVideoIdRef.current,
-      project_id: currentProjectIdRef.current || activeProjectIdRef.current,
+      project_id: currentProjectIdRef.current,
       watched_seconds: 1,
       duration_seconds: 0,
       completed: false,
@@ -108,7 +106,7 @@ function LearnContent() {
     try { dur = playerRef.current?.getDuration?.() || 0; } catch { /* ignore */ }
     const result = await saveWatchProgress({
       video_id: ytVideoIdRef.current,
-      project_id: currentProjectIdRef.current || activeProjectIdRef.current,
+      project_id: currentProjectIdRef.current,
       watched_seconds: dur,
       duration_seconds: dur,
       completed: true,
@@ -127,7 +125,7 @@ function LearnContent() {
       setSaving(true);
       const result = await saveWatchProgress({
         video_id: ytVideoIdRef.current,
-        project_id: currentProjectIdRef.current || activeProjectIdRef.current,
+        project_id: currentProjectIdRef.current,
         watched_seconds: 1,
         duration_seconds: 0,
         completed: false,
@@ -141,7 +139,7 @@ function LearnContent() {
       try { dur = playerRef.current?.getDuration?.() || 0; } catch { /* ignore */ }
       const result = await saveWatchProgress({
         video_id: ytVideoIdRef.current,
-        project_id: currentProjectIdRef.current || activeProjectIdRef.current,
+        project_id: currentProjectIdRef.current,
         watched_seconds: dur,
         duration_seconds: dur,
         completed: true,
@@ -243,6 +241,22 @@ function LearnContent() {
     } catch { /* ignore */ }
   };
 
+  if (!currentProject) {
+    return (
+      <PeriodClosedNotice
+        title="ยังไม่มีบทเรียนที่เปิดใช้งาน"
+        status={{
+          open: false,
+          reason: "inactive",
+          start: null,
+          end: null,
+          message: "ขณะนี้ไม่มีโครงการที่เปิดให้เข้าเรียน",
+        }}
+        homeHref="/"
+      />
+    );
+  }
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-12 animate-fade-in-up">
       {/* Header Banner */}
@@ -253,10 +267,10 @@ function LearnContent() {
               ศูนย์การเรียนรู้ออนไลน์
             </span>
             <h1 className="text-3xl font-extrabold text-[var(--primary-blue)]">
-              {currentProject?.name || "บทเรียนสำหรับตัวแทน ICT Talent"}
+              {currentProject.name || "บทเรียนสำหรับตัวแทน ICT Talent"}
             </h1>
             <p className="text-gray-600 text-sm mt-1">
-              {currentProject?.description || "รับชมวิดีโอเพื่อเรียนรู้ตามความสะดวก (รับชมได้ไม่จำกัดจำนวนครั้ง)"}
+              {currentProject.description || "รับชมวิดีโอเพื่อเรียนรู้ตามความสะดวก (รับชมได้ไม่จำกัดจำนวนครั้ง)"}
             </p>
           </div>
 
@@ -270,32 +284,6 @@ function LearnContent() {
             </svg>
           </Link>
         </div>
-
-        {/* Project Selector if multiple projects */}
-        {projects.length > 1 && (
-          <div className="mt-6 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-3">
-            <span className="text-sm font-semibold text-gray-700">เลือกโครงการ/วิชา:</span>
-            <div className="flex flex-wrap gap-2">
-              {projects.map((proj) => (
-                <button
-                  key={proj.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveProjectId(proj.id);
-                    setSelectedVideoId("");
-                  }}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-                    (currentProject?.id || activeProjectId) === proj.id
-                      ? "bg-[var(--primary-blue)] text-white shadow"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  {proj.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Video Playlist Selector if multiple videos */}

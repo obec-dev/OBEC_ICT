@@ -233,6 +233,50 @@ export async function adminDeleteSchoolProfilesRpc(token: string, schoolId: stri
   return { ok: true as const, deleted_count: Number(row.deleted_count) || 0 };
 }
 
+export async function adminSearchProfiles(token: string, query: string, limit = 50): Promise<Candidate[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_search_profiles", {
+    p_token: token,
+    p_query: query.trim(),
+    p_limit: limit,
+  });
+  if (error) throw new Error(error.message);
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => {
+    const p = asObj(item);
+    const first = String(p.first_name ?? "");
+    const last = String(p.last_name ?? "");
+    return {
+      id: String(p.profile_id),
+      school_id: String(p.school_id ?? ""),
+      school_name: p.school_name ? String(p.school_name) : undefined,
+      first_name: first,
+      last_name: last,
+      full_name: `${first} ${last}`.trim(),
+      phone: String(p.phone ?? ""),
+      remark: p.remark ? String(p.remark) : undefined,
+      created_at: p.created_at ? String(p.created_at) : new Date().toISOString(),
+    };
+  });
+}
+
+export async function adminUnlockExamRpc(
+  token: string,
+  profileId: string,
+  projectId?: string
+): Promise<{ ok: true; updated: number } | { ok: false; error: string }> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_unlock_exam", {
+    p_token: token,
+    p_profile_id: profileId,
+    p_project_id: projectId ?? null,
+  });
+  if (error) return { ok: false, error: error.message };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false, error: String(row.error ?? "ปลดล็อกข้อสอบไม่สำเร็จ") };
+  return { ok: true, updated: Number(row.updated) || 0 };
+}
+
 export type AuditLogRow = {
   log_id: string;
   admin_id: string | null;

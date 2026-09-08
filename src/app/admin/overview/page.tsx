@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
+import { getPassScoreAbsolute, getSiteProject } from "@/lib/siteSettings";
 import { adminOverviewStats, type AdminOverviewStats } from "@/lib/supabase/admin";
 
 function StatCard({
@@ -34,72 +35,43 @@ function StatCard({
   );
 }
 
-/** SVG Donut Chart component representing proportional status breakdowns */
 function DonutChart({
-  passed,
-  failed,
+  submitted,
   draft,
   notTaken,
   total,
 }: {
-  passed: number;
-  failed: number;
+  submitted: number;
   draft: number;
   notTaken: number;
   total: number;
 }) {
   const safeTotal = total > 0 ? total : 1;
-  const passedPct = Math.round((passed / safeTotal) * 100);
-  const failedPct = Math.round((failed / safeTotal) * 100);
+  const submittedPct = Math.round((submitted / safeTotal) * 100);
   const draftPct = Math.round((draft / safeTotal) * 100);
-  const notTakenPct = Math.max(0, 100 - passedPct - failedPct - draftPct);
+  const notTakenPct = Math.max(0, 100 - submittedPct - draftPct);
 
-  // SVG Circle Dash Calculations (r = 40, circumference = 2 * PI * 40 = 251.32)
   const c = 251.32;
-  const strokePassed = (passedPct / 100) * c;
-  const strokeFailed = (failedPct / 100) * c;
+  const strokeSubmitted = (submittedPct / 100) * c;
   const strokeDraft = (draftPct / 100) * c;
   const strokeNotTaken = (notTakenPct / 100) * c;
-
-  const offset1 = 0;
-  const offset2 = -strokePassed;
-  const offset3 = -(strokePassed + strokeFailed);
-  const offset4 = -(strokePassed + strokeFailed + strokeDraft);
 
   return (
     <div className="flex flex-col sm:flex-row items-center justify-around gap-8 bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
       <div className="relative w-48 h-48 flex items-center justify-center shrink-0">
         <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-          {/* Base Background Track */}
           <circle cx="50" cy="50" r="40" stroke="#f3f4f6" strokeWidth="14" fill="transparent" />
-
-          {/* Passed Slices (Emerald) */}
           <circle
             cx="50"
             cy="50"
             r="40"
-            stroke="#10b981"
+            stroke="#112652"
             strokeWidth="14"
             fill="transparent"
-            strokeDasharray={`${strokePassed} ${c - strokePassed}`}
-            strokeDashoffset={offset1}
+            strokeDasharray={`${strokeSubmitted} ${c - strokeSubmitted}`}
+            strokeDashoffset={0}
             className="transition-all duration-700"
           />
-
-          {/* Failed Slices (Red) */}
-          <circle
-            cx="50"
-            cy="50"
-            r="40"
-            stroke="#ef4444"
-            strokeWidth="14"
-            fill="transparent"
-            strokeDasharray={`${strokeFailed} ${c - strokeFailed}`}
-            strokeDashoffset={offset2}
-            className="transition-all duration-700"
-          />
-
-          {/* Draft Slices (Amber) */}
           <circle
             cx="50"
             cy="50"
@@ -108,11 +80,9 @@ function DonutChart({
             strokeWidth="14"
             fill="transparent"
             strokeDasharray={`${strokeDraft} ${c - strokeDraft}`}
-            strokeDashoffset={offset3}
+            strokeDashoffset={-strokeSubmitted}
             className="transition-all duration-700"
           />
-
-          {/* Not Taken Slices (Gray) */}
           <circle
             cx="50"
             cy="50"
@@ -121,54 +91,39 @@ function DonutChart({
             strokeWidth="14"
             fill="transparent"
             strokeDasharray={`${strokeNotTaken} ${c - strokeNotTaken}`}
-            strokeDashoffset={offset4}
+            strokeDashoffset={-(strokeSubmitted + strokeDraft)}
             className="transition-all duration-700"
           />
         </svg>
-
-        {/* Center Display */}
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-          <span className="text-3xl font-extrabold text-[var(--primary-blue)]">{passedPct}%</span>
-          <span className="text-[11px] font-semibold text-gray-500">ผ่านการทดสอบ</span>
+          <span className="text-3xl font-extrabold text-[var(--primary-blue)]">{submittedPct}%</span>
+          <span className="text-[11px] font-semibold text-gray-500">ส่งข้อสอบแล้ว</span>
         </div>
       </div>
 
-      {/* Legend Table */}
       <div className="space-y-3 w-full max-w-xs text-sm">
-        <div className="flex items-center justify-between p-2 rounded-xl bg-emerald-50 border border-emerald-100">
+        <div className="flex items-center justify-between p-2 rounded-xl bg-blue-50 border border-blue-100">
           <div className="flex items-center gap-2">
-            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 inline-block" />
-            <span className="font-bold text-emerald-900">ผู้ที่สอบผ่าน (Passed)</span>
+            <span className="w-3.5 h-3.5 rounded-full bg-[var(--primary-blue)] inline-block" />
+            <span className="font-bold text-[var(--primary-blue)]">ส่งข้อสอบแล้ว</span>
           </div>
-          <span className="font-extrabold text-emerald-900 tabular-nums">
-            {passed} ({passedPct}%)
+          <span className="font-extrabold tabular-nums">
+            {submitted} ({submittedPct}%)
           </span>
         </div>
-
-        <div className="flex items-center justify-between p-2 rounded-xl bg-red-50 border border-red-100">
-          <div className="flex items-center gap-2">
-            <span className="w-3.5 h-3.5 rounded-full bg-red-500 inline-block" />
-            <span className="font-bold text-red-900">ผู้ที่ไม่ผ่านเกณฑ์ (Failed)</span>
-          </div>
-          <span className="font-extrabold text-red-900 tabular-nums">
-            {failed} ({failedPct}%)
-          </span>
-        </div>
-
         <div className="flex items-center justify-between p-2 rounded-xl bg-amber-50 border border-amber-100">
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-3.5 rounded-full bg-amber-500 inline-block" />
-            <span className="font-bold text-amber-900">กำลังทำ/ร่างคำตอบ (Draft)</span>
+            <span className="font-bold text-amber-900">กำลังทำ / ฉบับร่าง</span>
           </div>
           <span className="font-extrabold text-amber-900 tabular-nums">
             {draft} ({draftPct}%)
           </span>
         </div>
-
         <div className="flex items-center justify-between p-2 rounded-xl bg-gray-50 border border-gray-200">
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-3.5 rounded-full bg-gray-400 inline-block" />
-            <span className="font-bold text-gray-700">ยังไม่ได้สอบ (Not Taken)</span>
+            <span className="font-bold text-gray-700">ยังไม่ได้เริ่มสอบ</span>
           </div>
           <span className="font-extrabold text-gray-700 tabular-nums">
             {notTaken} ({notTakenPct}%)
@@ -180,11 +135,13 @@ function DonutChart({
 }
 
 function OverviewContent() {
-  const { adminToken, projects, examProgress, candidates } = useIctStore();
+  const { adminToken, projects, examProgress, candidates, questions } = useIctStore();
   const [stats, setStats] = useState<AdminOverviewStats | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || "ict-talent-2026");
+
+  const siteProject = useMemo(() => getSiteProject(projects), [projects]);
+  const projectId = siteProject?.id;
 
   useEffect(() => {
     if (!adminToken) return;
@@ -194,19 +151,26 @@ function OverviewContent() {
       .finally(() => setLoading(false));
   }, [adminToken]);
 
-  const currentProject = projects.find((p) => p.id === selectedProjectId) || projects[0];
-
-  // Project Dashboard Calculations
-  const eligibleCandidatesCount = candidates.length || (stats?.profiles_total ?? 0);
+  const eligible = candidates.length || (stats?.profiles_total ?? 0);
   const projectExams = examProgress.filter(
-    (e) => e.project_id === selectedProjectId || (!e.project_id && selectedProjectId === "ict-talent-2026")
+    (e) => !projectId || e.project_id === projectId || !e.project_id
   );
-
-  const passedCount = projectExams.filter((e) => e.passed === true).length;
-  const failedCount = projectExams.filter((e) => e.status === "submitted" && e.passed === false).length;
   const draftCount = projectExams.filter((e) => e.status === "draft").length;
-  const notTakenCount = Math.max(0, eligibleCandidatesCount - passedCount - failedCount - draftCount);
+  const finishedCount = projectExams.filter((e) => e.status === "submitted").length;
+  const inProgressCount = draftCount;
+  const passedCount = projectExams.filter((e) => e.status === "submitted" && e.passed === true).length;
+  const failedCount = projectExams.filter(
+    (e) => e.status === "submitted" && e.passed === false
+  ).length;
+  const notTakenCount = Math.max(0, eligible - finishedCount - inProgressCount);
 
+  const maxScore =
+    questions
+      .filter((q) => !projectId || q.project_id === projectId)
+      .reduce((acc, q) => acc + (q.points || 1), 0) ||
+    siteProject?.max_score ||
+    5;
+  const passScore = getPassScoreAbsolute(siteProject?.pass_threshold, maxScore);
   const pct =
     stats && stats.schools_total > 0 ? Math.round((stats.schools_registered / stats.schools_total) * 100) : 0;
 
@@ -217,7 +181,10 @@ function OverviewContent() {
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">แดชบอร์ดผู้ดูแลระบบ</h1>
-          <p className="text-gray-500">ภาพรวมสถิติการลงทะเบียน และผลการประเมินการสอบรายโครงการ</p>
+          <p className="text-gray-500">
+            Part 1: ภาพรวมลงทะเบียน · Part 2: ติดตามการสอบ
+            {siteProject ? ` (${siteProject.name})` : ""}
+          </p>
         </div>
         <Link href="/dashboard" className="text-sm font-bold text-[var(--primary-blue)] underline">
           เปิดแดชบอร์ดสาธารณะ (รายเขต)
@@ -228,114 +195,90 @@ function OverviewContent() {
       {error && (
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
-          <div className="text-xs mt-1 opacity-80">
-            หากยังไม่ได้รัน RPC ให้รันไฟล์ <code>supabase/admin_audit_and_overview.sql</code>
-          </div>
         </div>
       )}
 
       {stats && (
         <>
-          {/* General Registration Summary Cards */}
-          <h2 className="text-lg font-bold text-[var(--primary-blue)] mb-3">การลงทะเบียนทั้งระบบ</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-            <StatCard label="โรงเรียนทั้งหมด" value={stats.schools_total.toLocaleString()} tone="blue" />
-            <StatCard
-              label="ลงทะเบียนแล้ว"
-              value={stats.schools_registered.toLocaleString()}
-              hint={`${pct}% ของโรงเรียนทั้งหมด`}
-              tone="green"
-            />
-            <StatCard label="เขตพื้นที่" value={stats.districts_total.toLocaleString()} tone="blue" />
-            <StatCard
-              label="ผู้สมัครทั้งหมด"
-              value={stats.profiles_total.toLocaleString()}
-              hint={`วันนี้ +${stats.profiles_today.toLocaleString()} คน`}
-              tone="amber"
-            />
-          </div>
-
-          <div className="mb-8 rounded-2xl border border-gray-100 bg-white p-5">
-            <div className="flex justify-between text-sm mb-2">
-              <span className="font-semibold text-gray-700">ความคืบหน้าโรงเรียนที่ลงทะเบียน</span>
-              <span className="font-bold text-[var(--primary-blue)]">{pct}%</span>
-            </div>
-            <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-[var(--accent-green)] transition-all"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Project Summary Metrics & Donut Chart Section */}
-          <div className="mb-8 border-t border-gray-200 pt-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-2xl font-extrabold text-[var(--primary-blue)] flex items-center gap-2">
-                  <span>📊 Project Summary Metrics & Status Breakdown</span>
-                </h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  สถิติผู้มีสิทธิสอบ ผู้สอบผ่าน และแผนภูมิ Donut Chart สัดส่วนการสอบรายโครงการ
-                </p>
-              </div>
-
-              {/* Project Selector for Dashboard */}
-              {projects.length > 1 && (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-gray-600">เลือกโครงการ:</span>
-                  <select
-                    className="rounded-full border border-gray-300 px-4 py-1.5 text-xs font-bold text-[var(--primary-blue)] bg-white shadow-xs"
-                    value={selectedProjectId}
-                    onChange={(e) => setSelectedProjectId(e.target.value)}
-                  >
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.id})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            {/* Project KPI Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          {/* Part 1 */}
+          <section className="mb-12">
+            <h2 className="text-xl font-extrabold text-[var(--primary-blue)] mb-1">Part 1: Registration Overview</h2>
+            <p className="text-xs text-gray-500 mb-4">ภาพรวมการลงทะเบียนโรงเรียนและผู้สมัครทั้งระบบ</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <StatCard label="โรงเรียนทั้งหมด" value={stats.schools_total.toLocaleString()} tone="blue" />
               <StatCard
-                label="ผู้มีสิทธิเข้าร่วมทดสอบ"
-                value={eligibleCandidatesCount.toLocaleString()}
-                hint="Total Eligible Candidates"
-                tone="blue"
-              />
-              <StatCard
-                label="ผู้ที่สอบผ่าน (Passed)"
-                value={passedCount.toLocaleString()}
-                hint={`เกณฑ์ผ่าน >= ${currentProject?.pass_threshold ?? 3} คะแนน`}
+                label="ลงทะเบียนแล้ว"
+                value={stats.schools_registered.toLocaleString()}
+                hint={`${pct}% ของโรงเรียนทั้งหมด`}
                 tone="green"
               />
+              <StatCard label="เขตพื้นที่" value={stats.districts_total.toLocaleString()} tone="blue" />
               <StatCard
-                label="ผู้ที่ไม่ผ่านเกณฑ์ (Failed)"
-                value={failedCount.toLocaleString()}
-                hint="ตรวจคำตอบแล้ว"
-                tone="red"
+                label="ผู้สมัครทั้งหมด"
+                value={stats.profiles_total.toLocaleString()}
+                hint={`วันนี้ +${stats.profiles_today.toLocaleString()} คน`}
+                tone="amber"
+              />
+            </div>
+            <div className="rounded-2xl border border-gray-100 bg-white p-5">
+              <div className="flex justify-between text-sm mb-2">
+                <span className="font-semibold text-gray-700">ความคืบหน้าโรงเรียนที่ลงทะเบียน</span>
+                <span className="font-bold text-[var(--primary-blue)]">{pct}%</span>
+              </div>
+              <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-[var(--accent-green)] transition-all"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* Part 2 */}
+          <section className="border-t border-gray-200 pt-10">
+            <h2 className="text-xl font-extrabold text-[var(--primary-blue)] mb-1">
+              Part 2: Exam Follow-up & Progress
+            </h2>
+            <p className="text-xs text-gray-500 mb-5">ติดตามสถานะการสอบและผลการผ่านเกณฑ์</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              <StatCard label="ผู้มีสิทธิ์สอบ" value={eligible.toLocaleString()} hint="Total Candidates" tone="blue" />
+              <StatCard
+                label="กำลังทำข้อสอบ / ฉบับร่าง"
+                value={inProgressCount.toLocaleString()}
+                hint="In-Progress / Draft"
+                tone="amber"
               />
               <StatCard
-                label="ยังไม่ได้สอบ / ร่างคำตอบ"
-                value={(draftCount + notTakenCount).toLocaleString()}
-                hint="Pending & Not Taken"
+                label="ส่งข้อสอบแล้ว"
+                value={finishedCount.toLocaleString()}
+                hint="Finished / Submitted"
                 tone="gray"
               />
             </div>
 
-            {/* Visual SVG Donut Chart */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+              <StatCard
+                label="สอบผ่าน"
+                value={passedCount.toLocaleString()}
+                hint={`เกณฑ์ผ่าน ≥ ${passScore} คะแนน (${siteProject?.pass_threshold ?? 60}%)`}
+                tone="green"
+              />
+              <StatCard
+                label="ยังไม่ผ่านเกณฑ์"
+                value={failedCount.toLocaleString()}
+                hint="ตรวจคำตอบแล้วและไม่ผ่าน"
+                tone="red"
+              />
+            </div>
+
             <DonutChart
-              passed={passedCount}
-              failed={failedCount}
-              draft={draftCount}
+              submitted={finishedCount}
+              draft={inProgressCount}
               notTaken={notTakenCount}
-              total={eligibleCandidatesCount}
+              total={eligible}
             />
-          </div>
+          </section>
         </>
       )}
     </div>

@@ -3,10 +3,11 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
+import { ModalOverlay } from "@/app/components/ModalOverlay";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { UnsavedLeaveGuard } from "@/app/components/UnsavedLeaveGuard";
 import { useIctStore } from "@/contexts/IctStore";
-import { getProjectExamStatus } from "@/lib/siteSettings";
+import { getProjectExamStatus, getProjectLearningOpen, getSiteProject } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
 import type { ExamProgress, LearningProject, ProjectQuestion } from "@/types/ict";
 
@@ -23,9 +24,6 @@ type ExamWorkspaceProps = {
   projectQuestions: ProjectQuestion[];
   exam: ExamProgress | undefined;
   locked: boolean;
-  projects: LearningProject[];
-  activeProjectId: string;
-  setActiveProjectId: (id: string) => void;
   initialAnswers: Record<string, string>;
   initialSavedAt: string | null;
 };
@@ -35,9 +33,6 @@ function ExamWorkspace({
   projectQuestions,
   exam,
   locked,
-  projects,
-  activeProjectId,
-  setActiveProjectId,
   initialAnswers,
   initialSavedAt,
 }: ExamWorkspaceProps) {
@@ -50,6 +45,7 @@ function ExamWorkspace({
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const isDirty = useMemo(
     () => !locked && !answersEqual(answers, lastSavedAnswers),
@@ -60,11 +56,16 @@ function ExamWorkspace({
     if (locked) return;
     setAnswers((prev) => ({ ...prev, [id]: value }));
     setSaveMessage("");
+    setSaveError("");
   };
 
   const ensureExamOpen = (): boolean => {
     if (!currentProject) {
       setSaveError("ไม่พบข้อมูลโครงการ");
+      return false;
+    }
+    if (!getProjectLearningOpen(currentProject)) {
+      setSaveError("โครงการนี้ปิดใช้งานชั่วคราว");
       return false;
     }
     const status = getProjectExamStatus(currentProject);
@@ -76,39 +77,46 @@ function ExamWorkspace({
   };
 
   const commitDraft = async () => {
+    setSaving(true);
+    setSaveError("");
     try {
       if (!ensureExamOpen()) return false;
-    } catch {
-      setSaveError("ตรวจสอบช่วงสอบไม่สำเร็จ");
+      const result = await saveExamDraft(answers, currentProject?.id);
+      if (!result.ok) {
+        setSaveError(result.error);
+        return false;
+      }
+      setLastSavedAnswers(answers);
+      setSavedAt(new Date().toISOString());
+      setSaveMessage("บันทึกร่างไปยังเซิร์ฟเวอร์แล้ว");
+      return true;
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "บันทึกร่างไม่สำเร็จ");
       return false;
+    } finally {
+      setSaving(false);
     }
-    const result = await saveExamDraft(answers, currentProject?.id);
-    if (!result.ok) {
-      setSaveError(result.error);
-      return false;
-    }
-    setLastSavedAnswers(answers);
-    setSavedAt(new Date().toISOString());
-    setSaveError("");
-    setSaveMessage("บันทึกร่างไปยังเซิร์ฟเวอร์แล้ว");
-    return true;
   };
 
   const handleSubmit = async () => {
-    setSaving(true);
-    if (!ensureExamOpen()) {
-      setSaving(false);
-      return;
+    if (submitting) return;
+    setSubmitting(true);
+    setSaveError("");
+    try {
+      if (!ensureExamOpen()) return;
+      const result = await submitExam(answers, currentProject?.id);
+      if (!result.ok) {
+        setSaveError(result.error);
+        return;
+      }
+      setLastSavedAnswers(answers);
+      setConfirmOpen(false);
+      setSaveMessage("ส่งคำตอบเรียบร้อยแล้ว");
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "ส่งข้อสอบไม่สำเร็จ");
+    } finally {
+      setSubmitting(false);
     }
-    const result = await submitExam(answers, currentProject?.id);
-    setSaving(false);
-    if (!result.ok) {
-      setSaveError(result.error);
-      return;
-    }
-    setLastSavedAnswers(answers);
-    setConfirmOpen(false);
-    setSaveMessage("ส่งคำตอบเรียบร้อยแล้ว");
   };
 
   return (
@@ -172,28 +180,6 @@ function ExamWorkspace({
             </span>
           </div>
         )}
-
-        {projects.length > 1 && (
-          <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-3">
-            <span className="text-xs font-semibold text-gray-600">เลือกชุดข้อสอบ:</span>
-            <div className="flex flex-wrap gap-2">
-              {projects.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setActiveProjectId(p.id)}
-                  className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
-                    (currentProject?.id || activeProjectId) === p.id
-                      ? "bg-[var(--primary-blue)] text-white shadow"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       {projectQuestions.length === 0 ? (
@@ -214,6 +200,17 @@ function ExamWorkspace({
                   </span>
                 )}
               </div>
+
+              {question.image_url && (
+                <div className="mb-4">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={question.image_url}
+                    alt={`ภาพประกอบข้อ ${index + 1}`}
+                    className="max-h-64 w-auto rounded-xl border border-gray-200 object-contain bg-gray-50"
+                  />
+                </div>
+              )}
 
               {question.type === "mcq" && question.options && (
                 <div className="space-y-2">
@@ -268,7 +265,7 @@ function ExamWorkspace({
         <div className="mt-8 flex flex-col sm:flex-row justify-end gap-3">
           <button
             type="button"
-            disabled={saving || !isDirty}
+            disabled={saving || submitting || !isDirty}
             onClick={() => void commitDraft()}
             className="rounded-full border-2 border-[var(--primary-blue)] text-[var(--primary-blue)] px-8 py-3.5 font-bold disabled:opacity-40 hover:bg-blue-50 transition-all"
           >
@@ -276,8 +273,12 @@ function ExamWorkspace({
           </button>
           <button
             type="button"
-            onClick={() => setConfirmOpen(true)}
-            className="rounded-full bg-[var(--accent-red)] text-white px-8 py-3.5 font-bold hover:-translate-y-0.5 shadow-md transition-all"
+            disabled={saving || submitting}
+            onClick={() => {
+              setSaveError("");
+              setConfirmOpen(true);
+            }}
+            className="rounded-full bg-[var(--accent-red)] text-white px-8 py-3.5 font-bold hover:-translate-y-0.5 shadow-md transition-all disabled:opacity-40"
           >
             ส่งคำตอบสุดท้าย
           </button>
@@ -285,55 +286,52 @@ function ExamWorkspace({
       )}
 
       {confirmOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-gray-100">
+        <ModalOverlay onBackdropClick={() => !submitting && setConfirmOpen(false)}>
+          <div className="bg-white rounded-3xl p-8 shadow-2xl border border-gray-100 mx-auto">
             <h3 className="text-xl font-bold text-[var(--primary-blue)] mb-2">ยืนยันการส่งข้อสอบ?</h3>
-            <p className="text-gray-600 text-sm mb-6">
+            <p className="text-gray-600 text-sm mb-4">
               หลังจากส่งข้อสอบแล้ว จะไม่สามารถแก้ไขคำตอบของวิชา {currentProject?.name || ""} ได้อีก
             </p>
+            {saveError && <p className="text-sm text-[var(--accent-red)] font-semibold mb-4">{saveError}</p>}
             <div className="flex gap-3 justify-end">
               <button
                 type="button"
-                className="px-5 py-2.5 rounded-full border border-gray-300 font-bold text-gray-700 text-sm hover:bg-gray-50"
+                disabled={submitting}
+                className="px-5 py-2.5 rounded-full border border-gray-300 font-bold text-gray-700 text-sm hover:bg-gray-50 disabled:opacity-40"
                 onClick={() => setConfirmOpen(false)}
               >
                 ยกเลิก
               </button>
               <button
                 type="button"
-                className="px-6 py-2.5 rounded-full bg-[var(--accent-red)] text-white font-bold text-sm hover:bg-red-700 shadow"
+                disabled={submitting}
+                className="px-6 py-2.5 rounded-full bg-[var(--accent-red)] text-white font-bold text-sm hover:bg-red-700 shadow disabled:opacity-60"
                 onClick={() => void handleSubmit()}
               >
-                ยืนยันส่งข้อสอบ
+                {submitting ? "กำลังส่ง..." : "ยืนยันส่งข้อสอบ"}
               </button>
             </div>
           </div>
-        </div>
+        </ModalOverlay>
       )}
     </div>
   );
 }
 
 function ExamContent() {
-  const {
-    currentCandidate,
-    getExamFor,
-    projects,
-    questions,
-    activeProjectId,
-    setActiveProjectId,
-  } = useIctStore();
+  const { currentCandidate, getExamFor, projects, questions } = useIctStore();
 
-  const currentProject = projects.find((p) => p.id === activeProjectId) || projects[0];
+  const currentProject = useMemo(() => getSiteProject(projects), [projects]);
 
   const projectQuestions: ProjectQuestion[] = useMemo(() => {
-    const raw = questions.filter((q) => q.project_id === (currentProject?.id || activeProjectId));
+    if (!currentProject) return [];
+    const raw = questions.filter((q) => q.project_id === currentProject.id);
     return raw.map((q) => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { correct_answer, model_answer, ...publicItem } = q;
       return publicItem as ProjectQuestion;
     });
-  }, [activeProjectId, currentProject?.id, questions]);
+  }, [currentProject, questions]);
 
   const exam = currentCandidate ? getExamFor(currentCandidate.id, currentProject?.id) : undefined;
   const locked = exam?.status === "submitted";
@@ -345,17 +343,33 @@ function ExamContent() {
         reason: "disabled" as const,
         start: null,
         end: null,
-        message: "ไม่พบข้อมูลโครงการ",
+        message: "ไม่พบโครงการที่เปิดใช้งาน",
       };
     }
     return getProjectExamStatus(currentProject);
   }, [currentProject]);
 
+  if (!currentProject) {
+    return (
+      <PeriodClosedNotice
+        title="ยังไม่มีโครงการที่เปิดใช้งาน"
+        status={{
+          open: false,
+          reason: "inactive",
+          start: null,
+          end: null,
+          message: "ขณะนี้ไม่มีโครงการที่เปิดให้เข้าสอบ",
+        }}
+        homeHref="/portal/learn"
+      />
+    );
+  }
+
   if (!examStatus.open && !locked) {
     return <PeriodClosedNotice title="ยังไม่เปิดช่วงสอบ" status={examStatus} homeHref="/portal/learn" />;
   }
 
-  const workspaceKey = `${currentCandidate?.id ?? "anon"}-${currentProject?.id ?? "none"}-${exam?.status ?? "none"}`;
+  const workspaceKey = `${currentCandidate?.id ?? "anon"}-${currentProject.id}-${exam?.status ?? "none"}`;
 
   return (
     <ExamWorkspace
@@ -364,9 +378,6 @@ function ExamContent() {
       projectQuestions={projectQuestions}
       exam={exam}
       locked={locked}
-      projects={projects}
-      activeProjectId={activeProjectId}
-      setActiveProjectId={setActiveProjectId}
       initialAnswers={exam?.answers ?? {}}
       initialSavedAt={exam?.updated_at ?? null}
     />

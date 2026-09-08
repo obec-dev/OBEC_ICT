@@ -83,10 +83,12 @@ export async function fetchPublicExamQuestions(projectId: string): Promise<Publi
 
 export async function upsertProject(project: LearningProject): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("projects").upsert({
+  const basePayload = {
     id: project.id,
     name: project.name,
     description: project.description,
+    is_active: project.is_active !== false,
+    cover_url: project.cover_url || null,
     reg_start: project.reg_start || null,
     reg_end: project.reg_end || null,
     reg_enabled: project.reg_enabled ?? true,
@@ -96,7 +98,16 @@ export async function upsertProject(project: LearningProject): Promise<void> {
     pass_threshold: project.pass_threshold ?? 3,
     max_score: project.max_score ?? 5,
     updated_at: new Date().toISOString(),
-  });
+  };
+
+  let { error } = await supabase.from("projects").upsert(basePayload);
+
+  // Backward-compatible fallback before is_active/cover_url migration is applied
+  if (error && /is_active|cover_url|column/i.test(error.message)) {
+    const { is_active: _a, cover_url: _c, ...legacyPayload } = basePayload;
+    ({ error } = await supabase.from("projects").upsert(legacyPayload));
+  }
+
   if (error) {
     console.error("upsertProject error:", error.message);
     throw new Error(`บันทึกโครงการไปยัง Supabase ไม่สำเร็จ: ${error.message}`);
@@ -140,7 +151,7 @@ export async function deleteProjectVideoDb(videoId: string): Promise<void> {
 
 export async function upsertProjectQuestion(question: ProjectQuestion): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("project_questions").upsert({
+  const payload: Record<string, unknown> = {
     id: String(question.id),
     project_id: question.project_id,
     prompt: question.prompt,
@@ -148,9 +159,16 @@ export async function upsertProjectQuestion(question: ProjectQuestion): Promise<
     options: question.options ?? [],
     correct_answer: question.correct_answer ?? null,
     model_answer: question.model_answer ?? null,
+    image_url: question.image_url || null,
     points: question.points ?? 1,
     order_index: question.order_index ?? 0,
-  });
+  };
+
+  let { error } = await supabase.from("project_questions").upsert(payload);
+  if (error && /image_url|column/i.test(error.message)) {
+    const { image_url: _i, ...legacy } = payload;
+    ({ error } = await supabase.from("project_questions").upsert(legacy));
+  }
   if (error) {
     console.error("upsertProjectQuestion error:", error.message);
     throw new Error(`บันทึกข้อสอบไปยัง Supabase ไม่สำเร็จ: ${error.message}`);

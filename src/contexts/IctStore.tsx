@@ -138,6 +138,10 @@ type IctStoreValue = {
     answers: Record<string, string>,
     projectId?: string
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  unlockExamForCandidate: (
+    candidateId: string,
+    projectId?: string
+  ) => Promise<{ ok: true; updated: number } | { ok: false; error: string }>;
   adminUpdateCandidate: (
     id: string,
     patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>
@@ -357,8 +361,13 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         const rpcResult = await gradeProjectExamsRpc(projectId);
 
         const project = projects.find((p) => p.id === projectId);
-        const passThreshold = project?.pass_threshold ?? 3;
         const projectQs = questions.filter((q) => q.project_id === projectId && q.correct_answer);
+        const maxScore =
+          questions.filter((q) => q.project_id === projectId).reduce((acc, q) => acc + (q.points || 1), 0) ||
+          project?.max_score ||
+          5;
+        const { getPassScoreAbsolute } = await import("@/lib/siteSettings");
+        const passThreshold = getPassScoreAbsolute(project?.pass_threshold, maxScore);
 
         let gradedCount = 0;
         let passedCount = 0;
@@ -630,14 +639,18 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const { getProjectExamStatus } = await import("@/lib/siteSettings");
+        const { getProjectExamStatus, isProjectActive } = await import("@/lib/siteSettings");
         const project = projects.find((p) => p.id === pId);
         if (!project) return { ok: false as const, error: "ไม่พบโครงการ" };
+        if (!isProjectActive(project)) {
+          return { ok: false as const, error: "โครงการนี้ปิดใช้งานชั่วคราว" };
+        }
         const examStatus = getProjectExamStatus(project);
         if (!examStatus.open) return { ok: false as const, error: examStatus.message };
 
         await upsertExamProgressToDb({
           profile_id: candidateId,
+          project_id: pId,
           answers,
           status: "draft",
         });
@@ -667,14 +680,24 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       const candidateId = session.candidate.id;
       const pId = targetProjectId || activeProjectId;
       try {
-        const { getProjectExamStatus } = await import("@/lib/siteSettings");
+        const { getProjectExamStatus, isProjectActive } = await import("@/lib/siteSettings");
         const project = projects.find((p) => p.id === pId);
         if (!project) return { ok: false as const, error: "ไม่พบโครงการ" };
+        if (!isProjectActive(project)) {
+          return { ok: false as const, error: "โครงการนี้ปิดใช้งานชั่วคราว ไม่สามารถส่งข้อสอบได้" };
+        }
+        const existing = examProgress.find(
+          (e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id)
+        );
+        if (existing?.status === "submitted") {
+          return { ok: false as const, error: "ส่งข้อสอบแล้ว ไม่สามารถส่งซ้ำได้" };
+        }
         const examStatus = getProjectExamStatus(project);
         if (!examStatus.open) return { ok: false as const, error: examStatus.message };
 
         await upsertExamProgressToDb({
           profile_id: candidateId,
+          project_id: pId,
           answers,
           status: "submitted",
         });
@@ -686,13 +709,60 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           updated_at: new Date().toISOString(),
         };
         setExamProgress((prev) => {
-          const existing = prev.find((e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id));
-          if (!existing) return [...prev, next];
+          const row = prev.find((e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id));
+          if (!row) return [...prev, next];
           return prev.map((e) => (e.candidate_id === candidateId && (e.project_id === pId || !e.project_id) ? next : e));
         });
         return { ok: true as const };
       } catch (err) {
         return { ok: false as const, error: err instanceof Error ? err.message : "ส่งข้อสอบไม่สำเร็จ" };
+      }
+    },
+    [activeProjectId, examProgress, projects, session]
+  );
+
+  const unlockExamForCandidate = useCallback(
+    async (candidateId: string, targetProjectId?: string) => {
+      const token = session?.kind === "admin" ? session.token : null;
+      if (!token) return { ok: false as const, error: "ไม่ได้เข้าสู่ระบบผู้ดูแล" };
+      const pId = targetProjectId || activeProjectId || projects[0]?.id;
+      try {
+        const { adminUnlockExamRpc } = await import("@/lib/supabase/admin");
+        const result = await adminUnlockExamRpc(token, candidateId, pId);
+        if (!result.ok) return result;
+
+        setExamProgress((prev) => {
+          const existing = prev.find(
+            (e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id)
+          );
+          if (!existing) {
+            return [
+              ...prev,
+              {
+                candidate_id: candidateId,
+                project_id: pId,
+                answers: {},
+                status: "draft" as const,
+                updated_at: new Date().toISOString(),
+              },
+            ];
+          }
+          return prev.map((e) =>
+            e.candidate_id === candidateId && (e.project_id === pId || !e.project_id)
+              ? {
+                  ...e,
+                  status: "draft" as const,
+                  score: undefined,
+                  passed: undefined,
+                  graded_at: undefined,
+                  updated_at: new Date().toISOString(),
+                }
+              : e
+          );
+        });
+        return { ok: true as const, updated: result.updated };
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : "ปลดล็อกไม่สำเร็จ" };
       }
     },
     [activeProjectId, projects, session]
@@ -818,6 +888,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       saveWatchProgress,
       saveExamDraft,
       submitExam,
+      unlockExamForCandidate,
       adminUpdateCandidate,
       updateCandidateProfile,
       adminDeleteCandidate,
@@ -864,6 +935,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       schoolTotals,
       session,
       submitExam,
+      unlockExamForCandidate,
       videos,
       watchProgress,
     ]

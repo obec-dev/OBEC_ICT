@@ -80,6 +80,8 @@ export type ExamQuestion = {
   options?: string[];
   correct_answer?: string;
   model_answer?: string;
+  /** Optional diagram / reference image shown to candidates during the exam */
+  image_url?: string | null;
   points?: number;
   order_index?: number;
 };
@@ -91,12 +93,17 @@ export type LearningProject = {
   id: string; // project_id e.g. "ict-talent-2026"
   name: string;
   description: string;
+  /** Master switch — inactive hides registration, exam, learn, and cover */
+  is_active?: boolean;
+  /** Optional cover/banner URL for homepage hero card */
+  cover_url?: string | null;
   reg_start?: string | null;
   reg_end?: string | null;
   reg_enabled?: boolean;
   exam_start?: string | null;
   exam_end?: string | null;
   exam_enabled?: boolean;
+  /** Pass threshold as percentage of max score (0–100). Legacy absolute values ≤10 are still supported when grading. */
   pass_threshold?: number;
   max_score?: number;
   created_at?: string;

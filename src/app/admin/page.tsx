@@ -22,6 +22,12 @@ function AdminHome() {
       show: true,
     },
     {
+      href: "/admin/candidates",
+      title: "ผู้สมัคร & ปลดล็อกสอบ",
+      desc: "ค้นหาด้วยเลขบัตร/รหัสโรงเรียน แก้ไข ลบ และปลดล็อกข้อสอบ (Allow Retake)",
+      show: true,
+    },
+    {
       href: "/admin/projects",
       title: "จัดการวิชา & ข้อสอบ (Exam Builder)",
       desc: "จัดการ Project ID, คลิปวิดีโอ (สวิตช์ Mandatory), และเครื่องมือสร้างข้อสอบ (MCQ & อัตนัย)",

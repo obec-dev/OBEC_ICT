@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { useIctStore } from "@/contexts/IctStore";
 import { STORAGE_KEYS } from "@/lib/storage";
-import { getProjectRegistrationStatus } from "@/lib/siteSettings";
+import { getProjectRegistrationStatus, getSiteProject } from "@/lib/siteSettings";
 import { disabledInputClass, inputClass } from "@/lib/styles";
 import {
   ENG_NAME_RE,
@@ -94,7 +94,7 @@ function buildBirthDate(day: string, month: string, year: string): string | null
 
 export default function RegisterFormPage() {
   const router = useRouter();
-  const { lookupSchool, registerCandidate, projects, activeProjectId, setActiveProjectId } = useIctStore();
+  const { lookupSchool, registerCandidate, projects } = useIctStore();
   const [ready, setReady] = useState(false);
   const [code, setCode] = useState("");
   const [matched, setMatched] = useState<School | null>(null);
@@ -105,12 +105,8 @@ export default function RegisterFormPage() {
   const [persons, setPersons] = useState<PersonDraft[]>([emptyPerson()]);
   const [periodLoading, setPeriodLoading] = useState(true);
 
-  const activeProjects = projects.filter((p) => getProjectRegistrationStatus(p).open);
-  const [selectedProjectId, setSelectedProjectId] = useState(
-    activeProjectId && activeProjects.some((p) => p.id === activeProjectId)
-      ? activeProjectId
-      : activeProjects[0]?.id || ""
-  );
+  const siteProject = getSiteProject(projects);
+  const registrationOpen = siteProject ? getProjectRegistrationStatus(siteProject).open : false;
 
   useEffect(() => {
     const ok = sessionStorage.getItem(STORAGE_KEYS.consent) === "accepted";
@@ -122,14 +118,6 @@ export default function RegisterFormPage() {
     setReady(true);
     setPeriodLoading(false);
   }, [router]);
-
-  useEffect(() => {
-    if (activeProjects.length > 0 && !activeProjects.some((p) => p.id === selectedProjectId)) {
-      const firstId = activeProjects[0].id;
-      setSelectedProjectId(firstId);
-      setActiveProjectId(firstId);
-    }
-  }, [activeProjects, selectedProjectId, setActiveProjectId]);
 
   const resetSchoolVerification = () => {
     setMatched(null);
@@ -253,12 +241,11 @@ export default function RegisterFormPage() {
     e.preventDefault();
     setFormError("");
 
-    const currentProject = projects.find((p) => p.id === selectedProjectId);
-    if (!currentProject) {
-      setFormError("กรุณาเลือกโครงการที่ต้องการสมัคร");
+    if (!siteProject) {
+      setFormError("ไม่พบโครงการที่เปิดรับสมัคร");
       return;
     }
-    const status = getProjectRegistrationStatus(currentProject);
+    const status = getProjectRegistrationStatus(siteProject);
     if (!status.open) {
       setFormError(status.message);
       return;
@@ -309,7 +296,7 @@ export default function RegisterFormPage() {
         duty: p.duty.trim(),
         line_id: p.line_id.trim(),
         email: p.email.trim(),
-        project_id: selectedProjectId,
+        project_id: siteProject.id,
       });
       if (!result.ok) {
         failures.push(`คนที่ ${i + 1} (${displayLabel}): ${result.error}`);
@@ -341,22 +328,24 @@ export default function RegisterFormPage() {
     );
   }
 
-  if (activeProjects.length === 0) {
+  if (!siteProject || !registrationOpen) {
     return (
       <PeriodClosedNotice
-        title="ขณะนี้ไม่มีโครงการ/วิชาที่เปิดรับลงทะเบียน"
-        status={{
-          open: false,
-          reason: "disabled",
-          start: null,
-          end: null,
-          message: "ขณะนี้ไม่มีโครงการ/วิชาที่เปิดรับลงทะเบียนในช่วงเวลานี้",
-        }}
+        title="ขณะนี้ปิดรับลงทะเบียน"
+        status={
+          siteProject
+            ? getProjectRegistrationStatus(siteProject)
+            : {
+                open: false,
+                reason: "disabled",
+                start: null,
+                end: null,
+                message: "ขณะนี้ไม่มีโครงการที่เปิดรับลงทะเบียนในช่วงเวลานี้",
+              }
+        }
       />
     );
   }
-
-  const isSingleProject = activeProjects.length === 1;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-12 animate-fade-in-up">
@@ -365,42 +354,15 @@ export default function RegisterFormPage() {
           <div className="bg-[var(--primary-blue)] px-8 py-6 text-white">
             <h1 className="text-2xl font-bold">แบบฟอร์มลงทะเบียน</h1>
             <p className="text-blue-100 mt-1">
-              เลือกวิชา/โครงการ ตรวจสอบรหัสโรงเรียน จากนั้นกรอกข้อมูลผู้สมัคร (เพิ่มได้หลายคนต่อโรงเรียน)
+              ตรวจสอบรหัสโรงเรียน จากนั้นกรอกข้อมูลผู้สมัคร (เพิ่มได้หลายคนต่อโรงเรียน)
             </p>
           </div>
 
           <div className="p-8 space-y-6">
             <div className="p-5 rounded-2xl bg-blue-50/70 border border-blue-100">
-              <label className="block text-sm font-bold text-[var(--primary-blue)] mb-2 flex items-center justify-between">
-                <span>📚 เลือกวิชา / โครงการที่ต้องการสมัคร (Select Project):</span>
-                {isSingleProject && (
-                  <span className="text-[11px] font-semibold text-gray-500 bg-gray-200 px-2.5 py-0.5 rounded-full">
-                    โครงการเดียวที่เปิดรับสมัคร
-                  </span>
-                )}
-              </label>
-
-              <select
-                disabled={isSingleProject || submitting || lookingUp}
-                value={selectedProjectId}
-                onChange={(e) => {
-                  const pId = e.target.value;
-                  setSelectedProjectId(pId);
-                  setActiveProjectId(pId);
-                }}
-                className={`w-full ${isSingleProject ? disabledInputClass : inputClass} font-semibold`}
-              >
-                {activeProjects.map((proj) => (
-                  <option key={proj.id} value={proj.id}>
-                    {proj.name} ({proj.id})
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-gray-500 mt-2">
-                {isSingleProject
-                  ? "ระบบเปิดรับสมัครเฉพาะโครงการนี้ในช่วงเวลานี้"
-                  : "สามารถเลือกโครงการที่ต้องการลงทะเบียนได้จากรายการข้างต้น"}
-              </p>
+              <p className="text-sm font-bold text-[var(--primary-blue)] mb-1">📚 โครงการที่เปิดรับสมัคร</p>
+              <p className="text-base font-extrabold text-gray-800">{siteProject.name}</p>
+              <p className="text-xs font-mono text-gray-500 mt-1">Project ID: {siteProject.id}</p>
             </div>
 
             <div className="flex items-center gap-2 text-sm font-semibold text-[var(--primary-blue)]">
