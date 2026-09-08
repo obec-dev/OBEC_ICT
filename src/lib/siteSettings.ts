@@ -81,6 +81,12 @@ export function datetimeLocalToIso(value: string): string | null {
   return d.toISOString();
 }
 
+/**
+ * Period rules (register + exam, per subject):
+ * 1. Checkbox closed → always closed (dates ignored)
+ * 2. Checkbox open + dates set → open only inside [start, end]
+ * 3. Checkbox open + dates empty → always open until manually closed
+ */
 function evaluatePeriod(
   enabled: boolean,
   start: string | null,
@@ -152,8 +158,8 @@ export function getExamStatus(settings: SitePeriodSettings, now = new Date()): P
 export function getProjectRegistrationStatus(project: LearningProject, now = new Date()): PeriodStatus {
   return evaluatePeriod(
     project.reg_enabled ?? true,
-    project.reg_start ?? null,
-    project.reg_end ?? null,
+    asIsoOrNull(project.reg_start),
+    asIsoOrNull(project.reg_end),
     {
       disabled: "โครงการนี้ปิดรับลงทะเบียน",
       notStarted: "ยังไม่ถึงกำหนดเปิดรับลงทะเบียนของโครงการนี้",
@@ -167,8 +173,8 @@ export function getProjectRegistrationStatus(project: LearningProject, now = new
 export function getProjectExamStatus(project: LearningProject, now = new Date()): PeriodStatus {
   return evaluatePeriod(
     project.exam_enabled ?? true,
-    project.exam_start ?? null,
-    project.exam_end ?? null,
+    asIsoOrNull(project.exam_start),
+    asIsoOrNull(project.exam_end),
     {
       disabled: "โครงการนี้ปิดช่วงสอบ",
       notStarted: "ยังไม่ถึงกำหนดเปิดสอบของโครงการนี้",
@@ -177,6 +183,42 @@ export function getProjectExamStatus(project: LearningProject, now = new Date())
     },
     now
   );
+}
+
+/** True if at least one subject currently allows registration (for home / consent gates). */
+export function getAnyProjectRegistrationStatus(
+  projects: LearningProject[],
+  now = new Date()
+): PeriodStatus {
+  if (!projects.length) {
+    return {
+      open: false,
+      reason: "disabled",
+      start: null,
+      end: null,
+      message: "ขณะนี้ไม่มีโครงการ/วิชาที่เปิดรับลงทะเบียน",
+    };
+  }
+
+  const statuses = projects.map((p) => getProjectRegistrationStatus(p, now));
+  const openStatus = statuses.find((s) => s.open);
+  if (openStatus) return openStatus;
+
+  const notStarted = statuses.find((s) => s.reason === "not_started");
+  if (notStarted) {
+    return { ...notStarted, message: "ยังไม่ถึงกำหนดเปิดรับลงทะเบียน" };
+  }
+  const ended = statuses.find((s) => s.reason === "ended");
+  if (ended) {
+    return { ...ended, message: "หมดเขตรับลงทะเบียนแล้ว" };
+  }
+  return {
+    open: false,
+    reason: "disabled",
+    start: null,
+    end: null,
+    message: "ขณะนี้ปิดรับลงทะเบียน",
+  };
 }
 
 export async function fetchPublicSiteSettings(): Promise<SitePeriodSettings> {

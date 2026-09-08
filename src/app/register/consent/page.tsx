@@ -1,30 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
+import { useIctStore } from "@/contexts/IctStore";
 import { STORAGE_KEYS } from "@/lib/storage";
-import {
-  fetchPublicSiteSettings,
-  getRegistrationStatus,
-  type PeriodStatus,
-} from "@/lib/siteSettings";
+import { getAnyProjectRegistrationStatus } from "@/lib/siteSettings";
 
 export default function ConsentPage() {
   const router = useRouter();
+  const { projects, hydrated } = useIctStore();
   const [terms, setTerms] = useState(false);
   const [pdpa, setPdpa] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [periodError, setPeriodError] = useState("");
-  const [regStatus, setRegStatus] = useState<PeriodStatus | null>(null);
   const canContinue = terms && pdpa;
 
-  useEffect(() => {
-    void fetchPublicSiteSettings()
-      .then((settings) => setRegStatus(getRegistrationStatus(settings)))
-      .catch((err) => setPeriodError(err instanceof Error ? err.message : "โหลดช่วงลงทะเบียนไม่สำเร็จ"))
-      .finally(() => setLoading(false));
-  }, []);
+  const regStatus = useMemo(
+    () => (hydrated ? getAnyProjectRegistrationStatus(projects) : null),
+    [hydrated, projects]
+  );
 
   const handleContinue = () => {
     if (!canContinue || !regStatus?.open) return;
@@ -32,7 +25,7 @@ export default function ConsentPage() {
     router.push("/register/form");
   };
 
-  if (loading) {
+  if (!hydrated || !regStatus) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-12">
         <p className="text-gray-500">กำลังตรวจสอบช่วงลงทะเบียน...</p>
@@ -40,15 +33,7 @@ export default function ConsentPage() {
     );
   }
 
-  if (periodError) {
-    return (
-      <div className="max-w-xl mx-auto px-4 py-16 text-center">
-        <p className="text-[var(--accent-red)]">{periodError}</p>
-      </div>
-    );
-  }
-
-  if (regStatus && !regStatus.open) {
+  if (!regStatus.open) {
     return <PeriodClosedNotice title="ยังไม่เปิดรับลงทะเบียน" status={regStatus} />;
   }
 
@@ -60,10 +45,8 @@ export default function ConsentPage() {
           <p className="text-blue-100 mt-1">กรุณาอ่านและยินยอมก่อนกรอกแบบลงทะเบียน</p>
         </div>
         <div className="p-8 space-y-6">
-          {regStatus?.start || regStatus?.end ? (
-            <p className="text-sm text-gray-500">
-              ช่วงรับลงทะเบียน: {regStatus.message}
-            </p>
+          {regStatus.start || regStatus.end ? (
+            <p className="text-sm text-gray-500">ช่วงรับลงทะเบียน: {regStatus.message}</p>
           ) : null}
           <section className="rounded-2xl bg-gray-50 p-5 text-sm text-gray-600 leading-relaxed max-h-56 overflow-auto">
             <h2 className="font-bold text-[var(--primary-blue)] mb-2">ข้อกำหนดและเงื่อนไข</h2>

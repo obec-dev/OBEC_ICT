@@ -1,24 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { useIctStore, useSchoolStats } from "@/contexts/IctStore";
-import {
-  fetchPublicSiteSettings,
-  getRegistrationStatus,
-  type PeriodStatus,
-} from "@/lib/siteSettings";
+import { getAnyProjectRegistrationStatus } from "@/lib/siteSettings";
 
 export default function Home() {
-  const { session, hydrated, loading, loadError } = useIctStore();
+  const { session, hydrated, loading, loadError, projects } = useIctStore();
   const stats = useSchoolStats();
-  const [regStatus, setRegStatus] = useState<PeriodStatus | null>(null);
-
-  useEffect(() => {
-    void fetchPublicSiteSettings()
-      .then((settings) => setRegStatus(getRegistrationStatus(settings)))
-      .catch(() => setRegStatus(null));
-  }, []);
+  const regStatus = useMemo(
+    () => (hydrated ? getAnyProjectRegistrationStatus(projects) : null),
+    [hydrated, projects]
+  );
 
   return (
     <div className="min-h-screen overflow-hidden">

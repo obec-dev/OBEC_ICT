@@ -4,6 +4,13 @@ import { useState } from "react";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
+import {
+  datetimeLocalToIso,
+  formatDateTimeTh,
+  getProjectExamStatus,
+  getProjectRegistrationStatus,
+  isoToDatetimeLocal,
+} from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
 import { extractYouTubeId, parseAnswerKeysCsv } from "@/lib/supabase/projects";
 import type { LearningProject, ProjectQuestion, ProjectVideo, QuestionType } from "@/types/ict";
@@ -211,9 +218,14 @@ function ProjectsManagementContent() {
       return;
     }
     // Max score is dynamically calculated from question points
-    const payload = {
+    const payload: LearningProject = {
       ...projForm,
       max_score: calculatedMaxScore > 0 ? calculatedMaxScore : projForm.max_score || 5,
+      // Store ISO; empty datetime-local → null (always-open while enabled)
+      reg_start: datetimeLocalToIso(projForm.reg_start || ""),
+      reg_end: datetimeLocalToIso(projForm.reg_end || ""),
+      exam_start: datetimeLocalToIso(projForm.exam_start || ""),
+      exam_end: datetimeLocalToIso(projForm.exam_end || ""),
     };
     const res = await saveProject(payload);
     if (res.ok) {
@@ -529,6 +541,10 @@ function ProjectsManagementContent() {
                         setProjForm({
                           ...currentProject,
                           max_score: calculatedMaxScore > 0 ? calculatedMaxScore : currentProject.max_score || 5,
+                          reg_start: isoToDatetimeLocal(currentProject.reg_start ?? null) || null,
+                          reg_end: isoToDatetimeLocal(currentProject.reg_end ?? null) || null,
+                          exam_start: isoToDatetimeLocal(currentProject.exam_start ?? null) || null,
+                          exam_end: isoToDatetimeLocal(currentProject.exam_end ?? null) || null,
                         });
                         setIsEditingProj(true);
                         setShowProjectModal(true);
@@ -570,24 +586,33 @@ function ProjectsManagementContent() {
                   </div>
                 </div>
 
-                {/* Schedule Status Box */}
+                {/* Schedule Status Box — live evaluation from checkbox + dates */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {(() => {
+                    const regLive = getProjectRegistrationStatus(currentProject);
+                    const examLive = getProjectExamStatus(currentProject);
+                    return (
+                      <>
                   <div className="bg-amber-50/60 p-6 rounded-2xl border border-amber-200">
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="font-bold text-amber-900 text-sm">🗓️ ช่วงเปิดรับลงทะเบียนประจำวิชา</h4>
                       <span
                         className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                          currentProject.reg_enabled ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
+                          regLive.open ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
                         }`}
                       >
-                        {currentProject.reg_enabled ? "เปิดรับสมัคร" : "ปิดรับสมัคร"}
+                        {regLive.open ? "เปิดรับสมัครตอนนี้" : "ปิดรับสมัครตอนนี้"}
                       </span>
                     </div>
+                    <p className="text-xs text-gray-600 mb-2">{regLive.message}</p>
                     <p className="text-xs text-gray-600">
-                      เริ่ม: {currentProject.reg_start ? new Date(currentProject.reg_start).toLocaleString("th-TH") : "ไม่กำหนด"}
+                      สวิตช์: {currentProject.reg_enabled ? "เปิด" : "ปิด"}
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      เริ่ม: {currentProject.reg_start ? formatDateTimeTh(currentProject.reg_start) : "ไม่กำหนด (เปิดตลอดจนกว่าจะปิดสวิตช์)"}
                     </p>
                     <p className="text-xs text-gray-600 mt-1">
-                      สิ้นสุด: {currentProject.reg_end ? new Date(currentProject.reg_end).toLocaleString("th-TH") : "ไม่กำหนด"}
+                      สิ้นสุด: {currentProject.reg_end ? formatDateTimeTh(currentProject.reg_end) : "ไม่กำหนด"}
                     </p>
                   </div>
 
@@ -596,19 +621,26 @@ function ProjectsManagementContent() {
                       <h4 className="font-bold text-purple-900 text-sm">✍️ ช่วงเปิดเข้าสอบประจำวิชา</h4>
                       <span
                         className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                          currentProject.exam_enabled ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
+                          examLive.open ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
                         }`}
                       >
-                        {currentProject.exam_enabled ? "เปิดให้สอบ" : "ปิดระบบสอบ"}
+                        {examLive.open ? "เปิดให้สอบตอนนี้" : "ปิดระบบสอบตอนนี้"}
                       </span>
                     </div>
+                    <p className="text-xs text-gray-600 mb-2">{examLive.message}</p>
                     <p className="text-xs text-gray-600">
-                      เริ่ม: {currentProject.exam_start ? new Date(currentProject.exam_start).toLocaleString("th-TH") : "ไม่กำหนด"}
+                      สวิตช์: {currentProject.exam_enabled ? "เปิด" : "ปิด"}
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      เริ่ม: {currentProject.exam_start ? formatDateTimeTh(currentProject.exam_start) : "ไม่กำหนด (เปิดตลอดจนกว่าจะปิดสวิตช์)"}
                     </p>
                     <p className="text-xs text-gray-600 mt-1">
-                      สิ้นสุด: {currentProject.exam_end ? new Date(currentProject.exam_end).toLocaleString("th-TH") : "ไม่กำหนด"}
+                      สิ้นสุด: {currentProject.exam_end ? formatDateTimeTh(currentProject.exam_end) : "ไม่กำหนด"}
                     </p>
                   </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -1013,14 +1045,18 @@ function ProjectsManagementContent() {
                     เปิดรับสมัคร
                   </label>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <p className="text-[10px] text-amber-800/80 leading-relaxed">
+                  ปิดสวิตช์ = ปิดทันที (ไม่สนวันที่) · เปิดสวิตช์ + ตั้งวันที่ = เปิดเฉพาะช่วงนั้น · เปิดสวิตช์ + ไม่ตั้งวันที่ = เปิดตลอดจนกว่าจะปิดสวิตช์
+                </p>
+                <div className={`grid grid-cols-2 gap-2 text-xs ${(projForm.reg_enabled ?? true) ? "" : "opacity-50"}`}>
                   <div>
                     <span>วันเริ่มต้น:</span>
                     <input
                       type="datetime-local"
                       className={inputClass}
-                      value={projForm.reg_start ? projForm.reg_start.slice(0, 16) : ""}
-                      onChange={(e) => setProjForm((prev) => ({ ...prev, reg_start: e.target.value }))}
+                      disabled={!(projForm.reg_enabled ?? true)}
+                      value={projForm.reg_start || ""}
+                      onChange={(e) => setProjForm((prev) => ({ ...prev, reg_start: e.target.value || null }))}
                     />
                   </div>
                   <div>
@@ -1028,8 +1064,9 @@ function ProjectsManagementContent() {
                     <input
                       type="datetime-local"
                       className={inputClass}
-                      value={projForm.reg_end ? projForm.reg_end.slice(0, 16) : ""}
-                      onChange={(e) => setProjForm((prev) => ({ ...prev, reg_end: e.target.value }))}
+                      disabled={!(projForm.reg_enabled ?? true)}
+                      value={projForm.reg_end || ""}
+                      onChange={(e) => setProjForm((prev) => ({ ...prev, reg_end: e.target.value || null }))}
                     />
                   </div>
                 </div>
@@ -1049,14 +1086,18 @@ function ProjectsManagementContent() {
                     เปิดระบบสอบ
                   </label>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <p className="text-[10px] text-purple-800/80 leading-relaxed">
+                  ปิดสวิตช์ = ปิดทันที (ไม่สนวันที่) · เปิดสวิตช์ + ตั้งวันที่ = เปิดเฉพาะช่วงนั้น · เปิดสวิตช์ + ไม่ตั้งวันที่ = เปิดตลอดจนกว่าจะปิดสวิตช์
+                </p>
+                <div className={`grid grid-cols-2 gap-2 text-xs ${(projForm.exam_enabled ?? true) ? "" : "opacity-50"}`}>
                   <div>
                     <span>วันเริ่มต้น:</span>
                     <input
                       type="datetime-local"
                       className={inputClass}
-                      value={projForm.exam_start ? projForm.exam_start.slice(0, 16) : ""}
-                      onChange={(e) => setProjForm((prev) => ({ ...prev, exam_start: e.target.value }))}
+                      disabled={!(projForm.exam_enabled ?? true)}
+                      value={projForm.exam_start || ""}
+                      onChange={(e) => setProjForm((prev) => ({ ...prev, exam_start: e.target.value || null }))}
                     />
                   </div>
                   <div>
@@ -1064,8 +1105,9 @@ function ProjectsManagementContent() {
                     <input
                       type="datetime-local"
                       className={inputClass}
-                      value={projForm.exam_end ? projForm.exam_end.slice(0, 16) : ""}
-                      onChange={(e) => setProjForm((prev) => ({ ...prev, exam_end: e.target.value }))}
+                      disabled={!(projForm.exam_enabled ?? true)}
+                      value={projForm.exam_end || ""}
+                      onChange={(e) => setProjForm((prev) => ({ ...prev, exam_end: e.target.value || null }))}
                     />
                   </div>
                 </div>

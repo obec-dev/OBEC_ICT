@@ -75,6 +75,8 @@ type RegisterInput = {
   duty: string;
   line_id: string;
   email: string;
+  /** Subject whose reg checkbox/window must be open */
+  project_id?: string;
 };
 
 type IctStoreValue = {
@@ -418,9 +420,18 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   const registerCandidate = useCallback(
     async (input: RegisterInput) => {
       try {
-        const { fetchPublicSiteSettings, getRegistrationStatus } = await import("@/lib/siteSettings");
-        const regStatus = getRegistrationStatus(await fetchPublicSiteSettings());
-        if (!regStatus.open) return { ok: false as const, error: regStatus.message };
+        const { getAnyProjectRegistrationStatus, getProjectRegistrationStatus } = await import(
+          "@/lib/siteSettings"
+        );
+        if (input.project_id) {
+          const project = projects.find((p) => p.id === input.project_id);
+          if (!project) return { ok: false as const, error: "ไม่พบโครงการที่เลือก" };
+          const regStatus = getProjectRegistrationStatus(project);
+          if (!regStatus.open) return { ok: false as const, error: regStatus.message };
+        } else {
+          const regStatus = getAnyProjectRegistrationStatus(projects);
+          if (!regStatus.open) return { ok: false as const, error: regStatus.message };
+        }
 
         const school = await fetchSchoolById(input.school_id);
         if (!school) return { ok: false as const, error: "ไม่พบรหัสโรงเรียนนี้ในระบบ" };
@@ -471,7 +482,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         };
       }
     },
-    []
+    [projects]
   );
 
   const login = useCallback(
@@ -619,8 +630,10 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const { fetchPublicSiteSettings, getExamStatus } = await import("@/lib/siteSettings");
-        const examStatus = getExamStatus(await fetchPublicSiteSettings());
+        const { getProjectExamStatus } = await import("@/lib/siteSettings");
+        const project = projects.find((p) => p.id === pId);
+        if (!project) return { ok: false as const, error: "ไม่พบโครงการ" };
+        const examStatus = getProjectExamStatus(project);
         if (!examStatus.open) return { ok: false as const, error: examStatus.message };
 
         await upsertExamProgressToDb({
@@ -645,7 +658,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: false as const, error: err instanceof Error ? err.message : "บันทึกร่างข้อสอบไม่สำเร็จ" };
       }
     },
-    [activeProjectId, examProgress, session]
+    [activeProjectId, examProgress, projects, session]
   );
 
   const submitExam = useCallback(
@@ -654,8 +667,10 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       const candidateId = session.candidate.id;
       const pId = targetProjectId || activeProjectId;
       try {
-        const { fetchPublicSiteSettings, getExamStatus } = await import("@/lib/siteSettings");
-        const examStatus = getExamStatus(await fetchPublicSiteSettings());
+        const { getProjectExamStatus } = await import("@/lib/siteSettings");
+        const project = projects.find((p) => p.id === pId);
+        if (!project) return { ok: false as const, error: "ไม่พบโครงการ" };
+        const examStatus = getProjectExamStatus(project);
         if (!examStatus.open) return { ok: false as const, error: examStatus.message };
 
         await upsertExamProgressToDb({
@@ -680,7 +695,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: false as const, error: err instanceof Error ? err.message : "ส่งข้อสอบไม่สำเร็จ" };
       }
     },
-    [activeProjectId, session]
+    [activeProjectId, projects, session]
   );
 
   const updateCandidateProfile = useCallback(

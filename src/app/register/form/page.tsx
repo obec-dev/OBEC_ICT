@@ -309,6 +309,7 @@ export default function RegisterFormPage() {
         duty: p.duty.trim(),
         line_id: p.line_id.trim(),
         email: p.email.trim(),
+        project_id: selectedProjectId,
       });
       if (!result.ok) {
         failures.push(`คนที่ ${i + 1} (${displayLabel}): ${result.error}`);
