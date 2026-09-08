@@ -1,0 +1,843 @@
+"use client";
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { LEARNING_VIDEO_ID } from "@/data/schools";
+import { adminLogin as adminLoginRpc, adminLogout as adminLogoutRpc } from "@/lib/supabase/admin";
+import {
+  deleteProfile,
+  fetchAllProfiles,
+  fetchDistrictStats,
+  fetchSchoolById,
+  fetchSchoolTotals,
+  findProfileForLogin,
+  insertProfile,
+  updateProfile,
+  upsertExamProgressToDb,
+  upsertWatchProgressToDb,
+} from "@/lib/supabase/data";
+import {
+  readPersistedState,
+  readSession,
+  writePersistedState,
+  writeSession,
+} from "@/lib/storage";
+import type {
+  AdminUser,
+  Candidate,
+  DistrictStat,
+  ExamProgress,
+  IctPersistedState,
+  LearningProject,
+  ProjectQuestion,
+  ProjectVideo,
+  School,
+  SchoolTotals,
+  SessionUser,
+  WatchProgress,
+} from "@/types/ict";
+import {
+  deleteProjectDb,
+  deleteProjectQuestionDb,
+  deleteProjectVideoDb,
+  fetchProjectQuestions,
+  fetchProjects,
+  fetchProjectVideos,
+  upsertProject,
+  upsertProjectQuestion,
+  upsertProjectVideo,
+} from "@/lib/supabase/projects";
+import { MOCK_PROJECTS, MOCK_QUESTIONS, MOCK_VIDEOS } from "@/data/mockProjects";
+
+type RegisterInput = {
+  profile_id: string;
+  school_id: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  remark?: string;
+};
+
+type IctStoreValue = {
+  hydrated: boolean;
+  loading: boolean;
+  loadError: string | null;
+  refreshData: () => Promise<void>;
+  districtStats: DistrictStat[];
+  schoolTotals: SchoolTotals;
+  candidates: Candidate[];
+  watchProgress: WatchProgress[];
+  examProgress: ExamProgress[];
+  projects: LearningProject[];
+  videos: ProjectVideo[];
+  questions: ProjectQuestion[];
+  activeProjectId: string;
+  setActiveProjectId: (id: string) => void;
+  saveProject: (project: LearningProject) => Promise<{ ok: true } | { ok: false; error: string }>;
+  deleteProject: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  saveProjectVideo: (video: ProjectVideo) => Promise<{ ok: true } | { ok: false; error: string }>;
+  deleteProjectVideo: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  saveProjectQuestion: (question: ProjectQuestion) => Promise<{ ok: true } | { ok: false; error: string }>;
+  deleteProjectQuestion: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  bulkSaveAnswerKeys: (
+    projectId: string,
+    keys: { questionIdOrOrder: string; correctAnswer: string }[]
+  ) => Promise<{ ok: true; updatedCount: number } | { ok: false; error: string }>;
+  gradeProjectExams: (
+    projectId: string
+  ) => Promise<{ ok: true; gradedCount: number; passedCount: number } | { ok: false; error: string }>;
+  session: SessionUser | null;
+  currentCandidate: Candidate | null;
+  isAdmin: boolean;
+  isSuperAdmin: boolean;
+  adminToken: string | null;
+  adminUser: AdminUser | null;
+  lookupSchool: (schoolId: string) => Promise<School | null>;
+  registerCandidate: (
+    input: RegisterInput
+  ) => Promise<{ ok: true; candidate: Candidate } | { ok: false; error: string }>;
+  login: (
+    profileIdOrAdmin: string,
+    phoneOrPassword: string
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  loginAdmin: (
+    username: string,
+    password: string
+  ) => Promise<{ ok: true; mustChangePassword: boolean } | { ok: false; error: string }>;
+  refreshAdminSession: (admin: AdminUser) => void;
+  logout: () => void;
+  saveWatchProgress: (
+    partial: Omit<WatchProgress, "candidate_id" | "last_updated">
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  saveExamDraft: (
+    answers: Record<string, string>,
+    projectId?: string
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  submitExam: (
+    answers: Record<string, string>,
+    projectId?: string
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  adminUpdateCandidate: (
+    id: string,
+    patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  updateCandidateProfile: (
+    id: string,
+    patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  adminDeleteCandidate: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  getWatchFor: (candidateId: string, videoId?: string) => WatchProgress | undefined;
+  getExamFor: (candidateId: string, projectId?: string) => ExamProgress | undefined;
+};
+
+const IctStoreContext = createContext<IctStoreValue | null>(null);
+
+const emptyTotals: SchoolTotals = { total: 0, registered: 0, zones: 0 };
+
+export function IctStoreProvider({ children }: { children: React.ReactNode }) {
+  const [hydrated, setHydrated] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [districtStats, setDistrictStats] = useState<DistrictStat[]>([]);
+  const [schoolTotals, setSchoolTotals] = useState<SchoolTotals>(emptyTotals);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [watchProgress, setWatchProgress] = useState<WatchProgress[]>([]);
+  const [examProgress, setExamProgress] = useState<ExamProgress[]>([]);
+  const [projects, setProjects] = useState<LearningProject[]>(MOCK_PROJECTS);
+  const [videos, setVideos] = useState<ProjectVideo[]>(MOCK_VIDEOS);
+  const [questions, setQuestions] = useState<ProjectQuestion[]>(MOCK_QUESTIONS);
+  const [activeProjectId, setActiveProjectId] = useState<string>("ict-talent-2026");
+  const [session, setSession] = useState<SessionUser | null>(null);
+
+  const refreshData = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [stats, totals, nextProfiles, dbProjects, dbVideos, dbQuestions] = await Promise.all([
+        fetchDistrictStats(),
+        fetchSchoolTotals(),
+        fetchAllProfiles(),
+        fetchProjects(),
+        fetchProjectVideos(),
+        fetchProjectQuestions(),
+      ]);
+      setDistrictStats(stats);
+      setSchoolTotals(totals);
+      setCandidates(nextProfiles);
+      if (dbProjects?.length) setProjects(dbProjects);
+      if (dbVideos?.length) setVideos(dbVideos);
+      if (dbQuestions?.length) setQuestions(dbQuestions);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "โหลดข้อมูลจากฐานข้อมูลไม่สำเร็จ");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const persisted = readPersistedState();
+    if (persisted) {
+      setWatchProgress(persisted.watchProgress ?? []);
+      setExamProgress(persisted.examProgress ?? []);
+      if (persisted.projects?.length) setProjects(persisted.projects);
+      if (persisted.videos?.length) setVideos(persisted.videos);
+      if (persisted.questions?.length) setQuestions(persisted.questions);
+    }
+    setSession(readSession());
+    setHydrated(true);
+    void refreshData();
+  }, [refreshData]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const state: IctPersistedState = { watchProgress, examProgress, projects, videos, questions };
+    writePersistedState(state);
+  }, [hydrated, watchProgress, examProgress, projects, videos, questions]);
+
+  const persistSession = useCallback((next: SessionUser | null) => {
+    setSession(next);
+    writeSession(next);
+  }, []);
+
+  const lookupSchool = useCallback(async (schoolId: string) => {
+    return fetchSchoolById(schoolId);
+  }, []);
+
+  const saveProject = useCallback(async (project: LearningProject) => {
+    try {
+      await upsertProject(project);
+      setProjects((prev) => {
+        const idx = prev.findIndex((p) => p.id === project.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = project;
+          return next;
+        }
+        return [...prev, project];
+      });
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : "บันทึกโครงการไม่สำเร็จ" };
+    }
+  }, []);
+
+  const deleteProject = useCallback(async (id: string) => {
+    try {
+      await deleteProjectDb(id);
+      setProjects((prev) => prev.filter((p) => p.id !== id));
+      setVideos((prev) => prev.filter((v) => v.project_id !== id));
+      setQuestions((prev) => prev.filter((q) => q.project_id !== id));
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : "ลบโครงการไม่สำเร็จ" };
+    }
+  }, []);
+
+  const saveProjectVideo = useCallback(async (video: ProjectVideo) => {
+    try {
+      await upsertProjectVideo(video);
+      setVideos((prev) => {
+        const idx = prev.findIndex((v) => v.id === video.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = video;
+          return next;
+        }
+        return [...prev, video];
+      });
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : "บันทึกวิดีโอไม่สำเร็จ" };
+    }
+  }, []);
+
+  const deleteProjectVideo = useCallback(async (id: string) => {
+    try {
+      await deleteProjectVideoDb(id);
+      setVideos((prev) => prev.filter((v) => v.id !== id));
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : "ลบวิดีโอไม่สำเร็จ" };
+    }
+  }, []);
+
+  const saveProjectQuestion = useCallback(async (question: ProjectQuestion) => {
+    try {
+      await upsertProjectQuestion(question);
+      setQuestions((prev) => {
+        const idx = prev.findIndex((q) => q.id === question.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = question;
+          return next;
+        }
+        return [...prev, question];
+      });
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : "บันทึกข้อสอบไม่สำเร็จ" };
+    }
+  }, []);
+
+  const deleteProjectQuestion = useCallback(async (id: string) => {
+    try {
+      await deleteProjectQuestionDb(id);
+      setQuestions((prev) => prev.filter((q) => q.id !== id));
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : "ลบข้อสอบไม่สำเร็จ" };
+    }
+  }, []);
+
+  const bulkSaveAnswerKeys = useCallback(
+    async (projectId: string, keys: { questionIdOrOrder: string; correctAnswer: string }[]) => {
+      try {
+        const projQuestions = questions.filter((q) => q.project_id === projectId);
+        let updatedCount = 0;
+        const nextQuestions = [...questions];
+
+        for (const item of keys) {
+          const target = projQuestions.find(
+            (q, index) =>
+              q.id === item.questionIdOrOrder ||
+              String(index + 1) === item.questionIdOrOrder ||
+              String(q.order_index) === item.questionIdOrOrder
+          );
+          if (target) {
+            let finalAnswer = item.correctAnswer;
+            // Map 1-based index (e.g. 1, 2, 3, 4) to option text if target has options
+            if (target.options && target.options.length > 0) {
+              const num = parseInt(item.correctAnswer, 10);
+              if (!Number.isNaN(num) && num >= 1 && num <= target.options.length) {
+                finalAnswer = target.options[num - 1];
+              }
+            }
+
+            const updated = { ...target, correct_answer: finalAnswer };
+            await upsertProjectQuestion(updated);
+            const idx = nextQuestions.findIndex((q) => q.id === target.id);
+            if (idx >= 0) nextQuestions[idx] = updated;
+            updatedCount++;
+          }
+        }
+        setQuestions(nextQuestions);
+        return { ok: true as const, updatedCount };
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : "อัปเดตเฉลยคำตอบไม่สำเร็จ" };
+      }
+    },
+    [questions]
+  );
+
+  const gradeProjectExams = useCallback(
+    async (projectId: string) => {
+      try {
+        const { gradeProjectExamsRpc } = await import("@/lib/supabase/projects");
+        const rpcResult = await gradeProjectExamsRpc(projectId);
+
+        const project = projects.find((p) => p.id === projectId);
+        const passThreshold = project?.pass_threshold ?? 3;
+        const projectQs = questions.filter((q) => q.project_id === projectId && q.correct_answer);
+
+        let gradedCount = 0;
+        let passedCount = 0;
+
+        setExamProgress((prev) =>
+          prev.map((exam) => {
+            if (exam.status !== "submitted") return exam;
+            if (exam.project_id && exam.project_id !== projectId && projectId !== "ict-talent-2026") return exam;
+
+            let score = 0;
+            for (const q of projectQs) {
+              const candidateAns = (exam.answers[q.id] || "").trim();
+              const correctAns = (q.correct_answer || "").trim();
+
+              if (!candidateAns || !correctAns) continue;
+
+              // Check direct text match
+              let isMatch = candidateAns === correctAns;
+
+              // If MCQ options exist, check option index matching (e.g., candidate selected option 2 or "ตัวเลือก 2")
+              if (!isMatch && q.options && q.options.length > 0) {
+                const corrIndex = q.options.indexOf(correctAns) + 1; // 1-based index
+                const candIndex = q.options.indexOf(candidateAns) + 1;
+
+                if (String(candIndex) === correctAns || String(corrIndex) === candidateAns) {
+                  isMatch = true;
+                }
+              }
+
+              if (isMatch) {
+                score += q.points || 1;
+              }
+            }
+            const passed = score >= passThreshold;
+            gradedCount++;
+            if (passed) passedCount++;
+
+            return {
+              ...exam,
+              score,
+              passed,
+              graded_at: new Date().toISOString(),
+            };
+          })
+        );
+
+        return {
+          ok: true as const,
+          gradedCount: rpcResult.graded_total || gradedCount,
+          passedCount: rpcResult.passed_total || passedCount,
+        };
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : "ตรวจข้อสอบไม่สำเร็จ" };
+      }
+    },
+    [projects, questions]
+  );
+
+  const registerCandidate = useCallback(
+    async (input: RegisterInput) => {
+      try {
+        const { fetchPublicSiteSettings, getRegistrationStatus } = await import("@/lib/siteSettings");
+        const regStatus = getRegistrationStatus(await fetchPublicSiteSettings());
+        if (!regStatus.open) return { ok: false as const, error: regStatus.message };
+
+        const school = await fetchSchoolById(input.school_id);
+        if (!school) return { ok: false as const, error: "ไม่พบรหัสโรงเรียนนี้ในระบบ" };
+
+        const candidate = await insertProfile({
+          profile_id: input.profile_id,
+          school_id: school.school_id,
+          first_name: input.first_name,
+          last_name: input.last_name,
+          phone: input.phone,
+          remark: input.remark,
+          pdpa_accepted: true,
+        });
+
+        setCandidates((prev) => [candidate, ...prev.filter((c) => c.id !== candidate.id)]);
+        setDistrictStats((prev) =>
+          prev.map((d) =>
+            d.district_id === school.district_id
+              ? {
+                  ...d,
+                  registered_schools: Math.min(d.total_schools, d.registered_schools + (school.is_registered ? 0 : 1)),
+                }
+              : d
+          )
+        );
+        setSchoolTotals((prev) => ({
+          ...prev,
+          registered: school.is_registered ? prev.registered : prev.registered + 1,
+        }));
+        return { ok: true as const, candidate };
+      } catch (err) {
+        return {
+          ok: false as const,
+          error: err instanceof Error ? err.message : "ลงทะเบียนไม่สำเร็จ",
+        };
+      }
+    },
+    []
+  );
+
+  const login = useCallback(
+    async (profileIdOrAdmin: string, phoneOrPassword: string) => {
+      try {
+        const rawId = profileIdOrAdmin.trim();
+        const rawPhone = phoneOrPassword.trim();
+        const digitsId = rawId.replace(/\D/g, "");
+        const digitsPhone = rawPhone.replace(/\D/g, "");
+
+        let candidate = await findProfileForLogin(rawId, rawPhone);
+
+        // Fallback 1: Search local candidates array in store state
+        if (!candidate) {
+          const matchLocal = candidates.find((c) => {
+            const candIdDigits = c.id.replace(/\D/g, "");
+            const candPhoneDigits = (c.phone || "").replace(/\D/g, "");
+            const idMatch = c.id === rawId || (digitsId && candIdDigits === digitsId);
+            const phoneMatch =
+              c.phone.trim() === rawPhone ||
+              (digitsPhone && candPhoneDigits === digitsPhone) ||
+              c.phone.trim() === digitsPhone;
+            return idMatch && (phoneMatch || (digitsId.length === 13 && candIdDigits === digitsId));
+          });
+          if (matchLocal) candidate = matchLocal;
+        }
+
+        // Fallback 2: Check all profiles from fetchAllProfiles
+        if (!candidate && (rawId || digitsId)) {
+          try {
+            const allProfs = await fetchAllProfiles();
+            const matchProf = allProfs.find((c) => {
+              const candIdDigits = c.id.replace(/\D/g, "");
+              const candPhoneDigits = (c.phone || "").replace(/\D/g, "");
+              const idMatch = c.id === rawId || (digitsId && candIdDigits === digitsId);
+              const phoneMatch =
+                c.phone.trim() === rawPhone ||
+                (digitsPhone && candPhoneDigits === digitsPhone) ||
+                c.phone.trim() === digitsPhone;
+              return idMatch && (phoneMatch || (digitsId.length === 13 && candIdDigits === digitsId));
+            });
+            if (matchProf) candidate = matchProf;
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (!candidate) return { ok: false as const, error: "เลขบัตรประชาชนหรือเบอร์โทรศัพท์ไม่ถูกต้อง" };
+        persistSession({ kind: "candidate", candidate });
+        return { ok: true as const };
+      } catch (err) {
+        const rawId = profileIdOrAdmin.trim();
+        const digitsId = rawId.replace(/\D/g, "");
+        const matchLocal = candidates.find(
+          (c) => c.id === rawId || (digitsId && c.id.replace(/\D/g, "") === digitsId)
+        );
+        if (matchLocal) {
+          persistSession({ kind: "candidate", candidate: matchLocal });
+          return { ok: true as const };
+        }
+        return {
+          ok: false as const,
+          error: err instanceof Error ? err.message : "เข้าสู่ระบบไม่สำเร็จ",
+        };
+      }
+    },
+    [candidates, persistSession]
+  );
+
+  const loginAdmin = useCallback(
+    async (username: string, password: string) => {
+      const result = await adminLoginRpc(username, password);
+      if (!result.ok) return { ok: false as const, error: result.error };
+      persistSession({ kind: "admin", admin: result.admin, token: result.token });
+      return { ok: true as const, mustChangePassword: result.admin.must_change_password };
+    },
+    [persistSession]
+  );
+
+  const refreshAdminSession = useCallback(
+    (admin: AdminUser) => {
+      if (session?.kind !== "admin") return;
+      persistSession({ kind: "admin", admin, token: session.token });
+    },
+    [persistSession, session]
+  );
+
+  const logout = useCallback(() => {
+    if (session?.kind === "admin") {
+      void adminLogoutRpc(session.token);
+    }
+    persistSession(null);
+    if (typeof window !== "undefined") {
+      window.location.href = "/";
+    }
+  }, [persistSession, session]);
+
+  const saveWatchProgress = useCallback(
+    async (partial: Omit<WatchProgress, "candidate_id" | "last_updated">) => {
+      if (session?.kind !== "candidate") return { ok: false as const, error: "ไม่ได้เข้าสู่ระบบ" };
+      const candidateId = session.candidate.id;
+      const next: WatchProgress = {
+        candidate_id: candidateId,
+        video_id: partial.video_id || LEARNING_VIDEO_ID,
+        project_id: partial.project_id || activeProjectId,
+        watched_seconds: partial.watched_seconds,
+        duration_seconds: partial.duration_seconds,
+        completed: partial.completed,
+        last_updated: new Date().toISOString(),
+      };
+
+      try {
+        await upsertWatchProgressToDb({
+          profile_id: candidateId,
+          video_id: next.video_id,
+          watched_seconds: next.watched_seconds,
+          duration_seconds: next.duration_seconds,
+          completed: next.completed,
+        });
+        setWatchProgress((prev) => {
+          const existing = prev.find((w) => w.candidate_id === candidateId && w.video_id === next.video_id);
+          const merged: WatchProgress = {
+            ...next,
+            completed: next.completed || existing?.completed || false,
+          };
+          if (!existing) return [...prev, merged];
+          return prev.map((w) => (w.candidate_id === candidateId && w.video_id === next.video_id ? merged : w));
+        });
+        return { ok: true as const };
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : "บันทึกบทเรียนไม่สำเร็จ" };
+      }
+    },
+    [activeProjectId, session]
+  );
+
+  const saveExamDraft = useCallback(
+    async (answers: Record<string, string>, targetProjectId?: string) => {
+      if (session?.kind !== "candidate") return { ok: false as const, error: "ไม่ได้เข้าสู่ระบบ" };
+      const candidateId = session.candidate.id;
+      const pId = targetProjectId || activeProjectId;
+      const existing = examProgress.find((e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id));
+      if (existing?.status === "submitted") {
+        return { ok: false as const, error: "ส่งข้อสอบแล้ว ไม่สามารถแก้ไขได้" };
+      }
+
+      try {
+        const { fetchPublicSiteSettings, getExamStatus } = await import("@/lib/siteSettings");
+        const examStatus = getExamStatus(await fetchPublicSiteSettings());
+        if (!examStatus.open) return { ok: false as const, error: examStatus.message };
+
+        await upsertExamProgressToDb({
+          profile_id: candidateId,
+          answers,
+          status: "draft",
+        });
+        const next: ExamProgress = {
+          candidate_id: candidateId,
+          project_id: pId,
+          answers,
+          status: "draft",
+          updated_at: new Date().toISOString(),
+        };
+        setExamProgress((prev) => {
+          const row = prev.find((e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id));
+          if (!row) return [...prev, next];
+          return prev.map((e) => (e.candidate_id === candidateId && (e.project_id === pId || !e.project_id) ? next : e));
+        });
+        return { ok: true as const };
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : "บันทึกร่างข้อสอบไม่สำเร็จ" };
+      }
+    },
+    [activeProjectId, examProgress, session]
+  );
+
+  const submitExam = useCallback(
+    async (answers: Record<string, string>, targetProjectId?: string) => {
+      if (session?.kind !== "candidate") return { ok: false as const, error: "ไม่ได้เข้าสู่ระบบ" };
+      const candidateId = session.candidate.id;
+      const pId = targetProjectId || activeProjectId;
+      try {
+        const { fetchPublicSiteSettings, getExamStatus } = await import("@/lib/siteSettings");
+        const examStatus = getExamStatus(await fetchPublicSiteSettings());
+        if (!examStatus.open) return { ok: false as const, error: examStatus.message };
+
+        await upsertExamProgressToDb({
+          profile_id: candidateId,
+          answers,
+          status: "submitted",
+        });
+        const next: ExamProgress = {
+          candidate_id: candidateId,
+          project_id: pId,
+          answers,
+          status: "submitted",
+          updated_at: new Date().toISOString(),
+        };
+        setExamProgress((prev) => {
+          const existing = prev.find((e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id));
+          if (!existing) return [...prev, next];
+          return prev.map((e) => (e.candidate_id === candidateId && (e.project_id === pId || !e.project_id) ? next : e));
+        });
+        return { ok: true as const };
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : "ส่งข้อสอบไม่สำเร็จ" };
+      }
+    },
+    [activeProjectId, session]
+  );
+
+  const updateCandidateProfile = useCallback(
+    async (id: string, patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>) => {
+      try {
+        await updateProfile(id, patch);
+        setCandidates((prev) =>
+          prev.map((c) => {
+            if (c.id !== id) return c;
+            const first_name = patch.first_name ?? c.first_name;
+            const last_name = patch.last_name ?? c.last_name;
+            return {
+              ...c,
+              ...patch,
+              first_name,
+              last_name,
+              full_name: `${first_name} ${last_name}`.trim(),
+            };
+          })
+        );
+        setSession((prev) => {
+          if (prev?.kind === "candidate" && prev.candidate.id === id) {
+            const first_name = patch.first_name ?? prev.candidate.first_name;
+            const last_name = patch.last_name ?? prev.candidate.last_name;
+            const updatedCand: Candidate = {
+              ...prev.candidate,
+              ...patch,
+              first_name,
+              last_name,
+              full_name: `${first_name} ${last_name}`.trim(),
+            };
+            if (typeof window !== "undefined") {
+              localStorage.setItem("ict_session_candidate", JSON.stringify(updatedCand));
+            }
+            return { ...prev, candidate: updatedCand };
+          }
+          return prev;
+        });
+        return { ok: true as const };
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : "อัปเดตไม่สำเร็จ" };
+      }
+    },
+    []
+  );
+
+  const adminUpdateCandidate = useCallback(
+    (id: string, patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>) =>
+      updateCandidateProfile(id, patch),
+    [updateCandidateProfile]
+  );
+
+  const adminDeleteCandidate = useCallback(async (id: string) => {
+    try {
+      await deleteProfile(id);
+      setCandidates((prev) => prev.filter((c) => c.id !== id));
+      setWatchProgress((prev) => prev.filter((w) => w.candidate_id !== id));
+      setExamProgress((prev) => prev.filter((e) => e.candidate_id !== id));
+      void refreshData();
+      return { ok: true as const };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : "ลบไม่สำเร็จ" };
+    }
+  }, [refreshData]);
+
+  const getWatchFor = useCallback(
+    (candidateId: string, videoId?: string) =>
+      watchProgress.find((w) => w.candidate_id === candidateId && (!videoId || w.video_id === videoId)),
+    [watchProgress]
+  );
+
+  const getExamFor = useCallback(
+    (candidateId: string, projectId?: string) =>
+      examProgress.find((e) => e.candidate_id === candidateId && (!projectId || e.project_id === projectId || !e.project_id)),
+    [examProgress]
+  );
+
+  const currentCandidate = session?.kind === "candidate" ? session.candidate : null;
+  const isAdmin = session?.kind === "admin";
+  const isSuperAdmin = session?.kind === "admin" && session.admin.role === "super_admin";
+  const adminToken = session?.kind === "admin" ? session.token : null;
+  const adminUser = session?.kind === "admin" ? session.admin : null;
+
+  const value = useMemo<IctStoreValue>(
+    () => ({
+      hydrated,
+      loading,
+      loadError,
+      refreshData,
+      districtStats,
+      schoolTotals,
+      candidates,
+      watchProgress,
+      examProgress,
+      projects,
+      videos,
+      questions,
+      activeProjectId,
+      setActiveProjectId,
+      saveProject,
+      deleteProject,
+      saveProjectVideo,
+      deleteProjectVideo,
+      saveProjectQuestion,
+      deleteProjectQuestion,
+      bulkSaveAnswerKeys,
+      gradeProjectExams,
+      session,
+      currentCandidate,
+      isAdmin,
+      isSuperAdmin,
+      adminToken,
+      adminUser,
+      lookupSchool,
+      registerCandidate,
+      login,
+      loginAdmin,
+      refreshAdminSession,
+      logout,
+      saveWatchProgress,
+      saveExamDraft,
+      submitExam,
+      adminUpdateCandidate,
+      updateCandidateProfile,
+      adminDeleteCandidate,
+      getWatchFor,
+      getExamFor,
+    }),
+    [
+      activeProjectId,
+      adminDeleteCandidate,
+      adminToken,
+      adminUpdateCandidate,
+      updateCandidateProfile,
+      adminUser,
+      bulkSaveAnswerKeys,
+      candidates,
+      currentCandidate,
+      deleteProject,
+      deleteProjectQuestion,
+      deleteProjectVideo,
+      districtStats,
+      examProgress,
+      getExamFor,
+      getWatchFor,
+      gradeProjectExams,
+      hydrated,
+      isAdmin,
+      isSuperAdmin,
+      loadError,
+      loading,
+      login,
+      loginAdmin,
+      logout,
+      lookupSchool,
+      projects,
+      questions,
+      refreshAdminSession,
+      refreshData,
+      registerCandidate,
+      saveExamDraft,
+      saveProject,
+      saveProjectQuestion,
+      saveProjectVideo,
+      saveWatchProgress,
+      schoolTotals,
+      session,
+      submitExam,
+      videos,
+      watchProgress,
+    ]
+  );
+
+  return <IctStoreContext.Provider value={value}>{children}</IctStoreContext.Provider>;
+}
+
+export function useIctStore() {
+  const ctx = useContext(IctStoreContext);
+  if (!ctx) throw new Error("useIctStore must be used within IctStoreProvider");
+  return ctx;
+}
+
+export function useSchoolStats() {
+  const { schoolTotals } = useIctStore();
+  return schoolTotals;
+}
