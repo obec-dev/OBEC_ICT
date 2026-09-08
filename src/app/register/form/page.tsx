@@ -5,28 +5,91 @@ import { useRouter } from "next/navigation";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { useIctStore } from "@/contexts/IctStore";
 import { STORAGE_KEYS } from "@/lib/storage";
-import { getProjectRegistrationStatus, type PeriodStatus } from "@/lib/siteSettings";
+import { getProjectRegistrationStatus } from "@/lib/siteSettings";
 import { disabledInputClass, inputClass } from "@/lib/styles";
-import type { School, LearningProject } from "@/types/ict";
+import {
+  ENG_NAME_RE,
+  THAI_NAME_RE,
+  TITLE_OPTIONS,
+  filterEnglishOnly,
+  filterThaiOnly,
+  getTitleByKey,
+  type TitleKey,
+} from "@/lib/titles";
+import type { School } from "@/types/ict";
 
 type PersonDraft = {
   key: string;
   profile_id: string;
+  title_key: TitleKey | "";
+  title_other_en: string;
+  title_other_th: string;
+  eng_first_name: string;
+  eng_last_name: string;
   first_name: string;
   last_name: string;
+  birth_day: string;
+  birth_month: string;
+  birth_year: string;
+  gender: "" | "male" | "female" | "other";
+  position: string;
+  duty: string;
   phone: string;
-  remark: string;
+  line_id: string;
+  email: string;
 };
+
+const MONTHS = [
+  { value: "01", label: "ม.ค. (01)" },
+  { value: "02", label: "ก.พ. (02)" },
+  { value: "03", label: "มี.ค. (03)" },
+  { value: "04", label: "เม.ย. (04)" },
+  { value: "05", label: "พ.ค. (05)" },
+  { value: "06", label: "มิ.ย. (06)" },
+  { value: "07", label: "ก.ค. (07)" },
+  { value: "08", label: "ส.ค. (08)" },
+  { value: "09", label: "ก.ย. (09)" },
+  { value: "10", label: "ต.ค. (10)" },
+  { value: "11", label: "พ.ย. (11)" },
+  { value: "12", label: "ธ.ค. (12)" },
+];
+
+const currentYear = new Date().getFullYear();
+const YEARS = Array.from({ length: 80 }, (_, i) => String(currentYear - 15 - i));
+const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
 
 function emptyPerson(): PersonDraft {
   return {
     key: crypto.randomUUID(),
     profile_id: "",
+    title_key: "",
+    title_other_en: "",
+    title_other_th: "",
+    eng_first_name: "",
+    eng_last_name: "",
     first_name: "",
     last_name: "",
+    birth_day: "",
+    birth_month: "",
+    birth_year: "",
+    gender: "",
+    position: "",
+    duty: "",
     phone: "",
-    remark: "",
+    line_id: "",
+    email: "",
   };
+}
+
+function buildBirthDate(day: string, month: string, year: string): string | null {
+  if (!day || !month || !year) return null;
+  const iso = `${year}-${month}-${day}`;
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  if (d.getFullYear() !== Number(year) || d.getMonth() + 1 !== Number(month) || d.getDate() !== Number(day)) {
+    return null;
+  }
+  return iso;
 }
 
 export default function RegisterFormPage() {
@@ -42,7 +105,6 @@ export default function RegisterFormPage() {
   const [persons, setPersons] = useState<PersonDraft[]>([emptyPerson()]);
   const [periodLoading, setPeriodLoading] = useState(true);
 
-  // Filter projects currently open for registration
   const activeProjects = projects.filter((p) => getProjectRegistrationStatus(p).open);
   const [selectedProjectId, setSelectedProjectId] = useState(
     activeProjectId && activeProjects.some((p) => p.id === activeProjectId)
@@ -107,6 +169,13 @@ export default function RegisterFormPage() {
     setPersons((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
   };
 
+  const setLinkedTitle = (personKey: string, titleKey: TitleKey | "") => {
+    updatePerson(personKey, {
+      title_key: titleKey,
+      ...(titleKey !== "other" ? { title_other_en: "", title_other_th: "" } : {}),
+    });
+  };
+
   const addPerson = () => {
     setPersons((prev) => [...prev, emptyPerson()]);
   };
@@ -117,18 +186,60 @@ export default function RegisterFormPage() {
 
   const validatePersons = (): string | null => {
     const ids = new Set<string>();
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
     for (let i = 0; i < persons.length; i++) {
       const p = persons[i];
       const label = `คนที่ ${i + 1}`;
+
       if (!/^\d{13}$/.test(p.profile_id.trim())) {
         return `${label}: เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก`;
       }
-      if (!p.first_name.trim() || !p.last_name.trim()) {
-        return `${label}: กรุณากรอกชื่อและนามสกุล`;
+      if (!p.title_key) {
+        return `${label}: กรุณาเลือกคำนำหน้าชื่อ`;
+      }
+      const title = getTitleByKey(p.title_key);
+      if (!title) return `${label}: คำนำหน้าชื่อไม่ถูกต้อง`;
+      if (p.title_key === "other") {
+        if (!p.title_other_en.trim() || !p.title_other_th.trim()) {
+          return `${label}: กรุณากรอกคำนำหน้าชื่อ (Other / อื่นๆ) ทั้งภาษาอังกฤษและไทย`;
+        }
+      }
+      if (!p.eng_first_name.trim() || !ENG_NAME_RE.test(p.eng_first_name.trim())) {
+        return `${label}: Eng name ต้องเป็นตัวอักษรภาษาอังกฤษเท่านั้น`;
+      }
+      if (!p.eng_last_name.trim() || !ENG_NAME_RE.test(p.eng_last_name.trim())) {
+        return `${label}: Eng surname ต้องเป็นตัวอักษรภาษาอังกฤษเท่านั้น`;
+      }
+      if (!p.first_name.trim() || !THAI_NAME_RE.test(p.first_name.trim())) {
+        return `${label}: ชื่อไทยต้องเป็นตัวอักษรภาษาไทยเท่านั้น`;
+      }
+      if (!p.last_name.trim() || !THAI_NAME_RE.test(p.last_name.trim())) {
+        return `${label}: นามสกุลไทยต้องเป็นตัวอักษรภาษาไทยเท่านั้น`;
+      }
+      const birth = buildBirthDate(p.birth_day, p.birth_month, p.birth_year);
+      if (!birth) {
+        return `${label}: กรุณาเลือกวัน เดือน ปีเกิดให้ถูกต้อง`;
+      }
+      if (!p.gender) {
+        return `${label}: กรุณาเลือกเพศ`;
+      }
+      if (!p.position.trim()) {
+        return `${label}: กรุณากรอกตำแหน่ง`;
+      }
+      if (!p.duty.trim()) {
+        return `${label}: กรุณากรอกหน้าที่`;
       }
       if (!p.phone.trim()) {
         return `${label}: กรุณากรอกเบอร์โทรศัพท์`;
       }
+      if (!p.line_id.trim()) {
+        return `${label}: กรุณากรอก Line ID`;
+      }
+      if (!p.email.trim() || !emailRe.test(p.email.trim())) {
+        return `${label}: กรุณากรอกอีเมลให้ถูกต้อง`;
+      }
+
       const id = p.profile_id.trim();
       if (ids.has(id)) {
         return `เลขบัตรประชาชน ${id} ซ้ำในฟอร์ม`;
@@ -170,16 +281,37 @@ export default function RegisterFormPage() {
 
     for (let i = 0; i < persons.length; i++) {
       const p = persons[i];
+      const title = getTitleByKey(p.title_key as TitleKey)!;
+      const birth_date = buildBirthDate(p.birth_day, p.birth_month, p.birth_year)!;
+      const title_en = p.title_key === "other" ? p.title_other_en.trim() : title.en;
+      const title_th = p.title_key === "other" ? p.title_other_th.trim() : title.th;
+      const displayLabel =
+        p.title_key === "other"
+          ? `${p.title_other_th.trim()} ${p.first_name} ${p.last_name}`
+          : `${title.th} ${p.first_name} ${p.last_name}`;
+
       const result = await registerCandidate({
         profile_id: p.profile_id.trim(),
         school_id: matched.school_id,
-        first_name: p.first_name,
-        last_name: p.last_name,
-        phone: p.phone,
-        remark: p.remark,
+        first_name: p.first_name.trim(),
+        last_name: p.last_name.trim(),
+        phone: p.phone.trim(),
+        title_key: p.title_key,
+        title_en,
+        title_th,
+        title_other_en: p.title_key === "other" ? p.title_other_en.trim() : undefined,
+        title_other_th: p.title_key === "other" ? p.title_other_th.trim() : undefined,
+        eng_first_name: p.eng_first_name.trim(),
+        eng_last_name: p.eng_last_name.trim(),
+        birth_date,
+        gender: p.gender,
+        position: p.position.trim(),
+        duty: p.duty.trim(),
+        line_id: p.line_id.trim(),
+        email: p.email.trim(),
       });
       if (!result.ok) {
-        failures.push(`คนที่ ${i + 1} (${p.first_name} ${p.last_name}): ${result.error}`);
+        failures.push(`คนที่ ${i + 1} (${displayLabel}): ${result.error}`);
       } else {
         successCount += 1;
       }
@@ -208,7 +340,6 @@ export default function RegisterFormPage() {
     );
   }
 
-  // If no active projects are open for registration
   if (activeProjects.length === 0) {
     return (
       <PeriodClosedNotice
@@ -238,7 +369,6 @@ export default function RegisterFormPage() {
           </div>
 
           <div className="p-8 space-y-6">
-            {/* Project Selection Dropdown */}
             <div className="p-5 rounded-2xl bg-blue-50/70 border border-blue-100">
               <label className="block text-sm font-bold text-[var(--primary-blue)] mb-2 flex items-center justify-between">
                 <span>📚 เลือกวิชา / โครงการที่ต้องการสมัคร (Select Project):</span>
@@ -359,95 +489,339 @@ export default function RegisterFormPage() {
               ข้อมูลผู้สมัคร ({persons.length} คน)
             </div>
 
-            {persons.map((person, index) => (
-              <div
-                key={person.key}
-                className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden"
-              >
-                <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-100 bg-gray-50">
-                  <h2 className="font-bold text-[var(--primary-blue)]">ผู้สมัครคนที่ {index + 1}</h2>
-                  {persons.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removePerson(person.key)}
-                      disabled={submitting}
-                      className="text-sm font-semibold text-[var(--accent-red)] hover:underline disabled:opacity-40"
-                    >
-                      ลบคนนี้
-                    </button>
-                  )}
-                </div>
+            {persons.map((person, index) => {
+              const isOther = person.title_key === "other";
+              return (
+                <div
+                  key={person.key}
+                  className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden"
+                >
+                  <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-100 bg-gray-50">
+                    <h2 className="font-bold text-[var(--primary-blue)]">ผู้สมัครคนที่ {index + 1}</h2>
+                    {persons.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removePerson(person.key)}
+                        disabled={submitting}
+                        className="text-sm font-semibold text-[var(--accent-red)] hover:underline disabled:opacity-40"
+                      >
+                        ลบคนนี้
+                      </button>
+                    )}
+                  </div>
 
-                <div className="p-6 space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                      เลขบัตรประชาชน
-                    </label>
-                    <input
-                      className={inputClass}
-                      required
-                      inputMode="numeric"
-                      maxLength={13}
-                      value={person.profile_id}
-                      disabled={submitting}
-                      onChange={(e) =>
-                        updatePerson(person.key, {
-                          profile_id: e.target.value.replace(/\D/g, "").slice(0, 13),
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-6 space-y-4">
                     <div>
-                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">ชื่อ</label>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        Personal ID / เลขบัตรประชาชน
+                      </label>
                       <input
                         className={inputClass}
                         required
-                        value={person.first_name}
+                        inputMode="numeric"
+                        maxLength={13}
+                        value={person.profile_id}
                         disabled={submitting}
-                        onChange={(e) => updatePerson(person.key, { first_name: e.target.value })}
+                        onChange={(e) =>
+                          updatePerson(person.key, {
+                            profile_id: e.target.value.replace(/\D/g, "").slice(0, 13),
+                          })
+                        }
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">นามสกุล</label>
-                      <input
-                        className={inputClass}
-                        required
-                        value={person.last_name}
-                        disabled={submitting}
-                        onChange={(e) => updatePerson(person.key, { last_name: e.target.value })}
-                      />
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                          Eng Title
+                        </label>
+                        <select
+                          className={inputClass}
+                          required
+                          value={person.title_key}
+                          disabled={submitting}
+                          onChange={(e) => setLinkedTitle(person.key, e.target.value as TitleKey | "")}
+                        >
+                          <option value="">-- Select --</option>
+                          {TITLE_OPTIONS.map((t) => (
+                            <option key={t.key} value={t.key}>
+                              {t.en}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                          Thai Title / คำนำหน้า
+                        </label>
+                        <select
+                          className={inputClass}
+                          required
+                          value={person.title_key}
+                          disabled={submitting}
+                          onChange={(e) => setLinkedTitle(person.key, e.target.value as TitleKey | "")}
+                        >
+                          <option value="">-- เลือก --</option>
+                          {TITLE_OPTIONS.map((t) => (
+                            <option key={t.key} value={t.key}>
+                              {t.th}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                      เบอร์โทรศัพท์
-                    </label>
-                    <input
-                      className={inputClass}
-                      required
-                      value={person.phone}
-                      disabled={submitting}
-                      onChange={(e) => updatePerson(person.key, { phone: e.target.value })}
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      ใช้สำหรับติดต่อกลับ — วันเปิดเข้าสู่ระบบจะประกาศภายหลัง
+                    <p className="text-xs text-gray-500 -mt-2">
+                      คำนำหน้า EN และ TH เชื่อมกัน — เปลี่ยนฝั่งใดฝั่งหนึ่ง อีกฝั่งจะเปลี่ยนตาม
                     </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                      หมายเหตุ (ถ้ามี)
-                    </label>
-                    <input
-                      className={inputClass}
-                      value={person.remark}
-                      disabled={submitting}
-                      onChange={(e) => updatePerson(person.key, { remark: e.target.value })}
-                    />
+
+                    {isOther && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                            Other title (EN)
+                          </label>
+                          <input
+                            className={inputClass}
+                            required
+                            value={person.title_other_en}
+                            disabled={submitting}
+                            placeholder="Please specify"
+                            onChange={(e) => updatePerson(person.key, { title_other_en: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                            คำนำหน้าอื่นๆ (TH)
+                          </label>
+                          <input
+                            className={inputClass}
+                            required
+                            value={person.title_other_th}
+                            disabled={submitting}
+                            placeholder="กรุณาระบุ"
+                            onChange={(e) => updatePerson(person.key, { title_other_th: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                          Eng name
+                        </label>
+                        <input
+                          className={inputClass}
+                          required
+                          lang="en"
+                          autoCapitalize="words"
+                          value={person.eng_first_name}
+                          disabled={submitting}
+                          placeholder="English only"
+                          onChange={(e) =>
+                            updatePerson(person.key, { eng_first_name: filterEnglishOnly(e.target.value) })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                          Eng surname
+                        </label>
+                        <input
+                          className={inputClass}
+                          required
+                          lang="en"
+                          autoCapitalize="words"
+                          value={person.eng_last_name}
+                          disabled={submitting}
+                          placeholder="English only"
+                          onChange={(e) =>
+                            updatePerson(person.key, { eng_last_name: filterEnglishOnly(e.target.value) })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                          ชื่อ (ไทย)
+                        </label>
+                        <input
+                          className={inputClass}
+                          required
+                          lang="th"
+                          value={person.first_name}
+                          disabled={submitting}
+                          placeholder="ภาษาไทยเท่านั้น"
+                          onChange={(e) =>
+                            updatePerson(person.key, { first_name: filterThaiOnly(e.target.value) })
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                          นามสกุล (ไทย)
+                        </label>
+                        <input
+                          className={inputClass}
+                          required
+                          lang="th"
+                          value={person.last_name}
+                          disabled={submitting}
+                          placeholder="ภาษาไทยเท่านั้น"
+                          onChange={(e) =>
+                            updatePerson(person.key, { last_name: filterThaiOnly(e.target.value) })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        วัน / เดือน / ปีเกิด (ค.ศ.)
+                      </label>
+                      <div className="grid grid-cols-3 gap-3">
+                        <select
+                          className={inputClass}
+                          required
+                          value={person.birth_day}
+                          disabled={submitting}
+                          onChange={(e) => updatePerson(person.key, { birth_day: e.target.value })}
+                        >
+                          <option value="">วัน</option>
+                          {DAYS.map((d) => (
+                            <option key={d} value={d}>
+                              {Number(d)}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className={inputClass}
+                          required
+                          value={person.birth_month}
+                          disabled={submitting}
+                          onChange={(e) => updatePerson(person.key, { birth_month: e.target.value })}
+                        >
+                          <option value="">เดือน</option>
+                          {MONTHS.map((m) => (
+                            <option key={m.value} value={m.value}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className={inputClass}
+                          required
+                          value={person.birth_year}
+                          disabled={submitting}
+                          onChange={(e) => updatePerson(person.key, { birth_year: e.target.value })}
+                        >
+                          <option value="">ปี</option>
+                          {YEARS.map((y) => (
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">เพศ / Gender</label>
+                      <select
+                        className={inputClass}
+                        required
+                        value={person.gender}
+                        disabled={submitting}
+                        onChange={(e) =>
+                          updatePerson(person.key, {
+                            gender: e.target.value as PersonDraft["gender"],
+                          })
+                        }
+                      >
+                        <option value="">-- เลือก --</option>
+                        <option value="male">ชาย / Male</option>
+                        <option value="female">หญิง / Female</option>
+                        <option value="other">อื่นๆ / Other</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        ตำแหน่ง / Position
+                      </label>
+                      <input
+                        className={inputClass}
+                        required
+                        value={person.position}
+                        disabled={submitting}
+                        placeholder="ครูชำนาญการ"
+                        onChange={(e) => updatePerson(person.key, { position: e.target.value })}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        หน้าที่ / Duty
+                      </label>
+                      <input
+                        className={inputClass}
+                        required
+                        value={person.duty}
+                        disabled={submitting}
+                        placeholder="สอนวิชา ... ระดับชั้น ..."
+                        onChange={(e) => updatePerson(person.key, { duty: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                          เบอร์โทรศัพท์ / Phone
+                        </label>
+                        <input
+                          className={inputClass}
+                          required
+                          inputMode="tel"
+                          value={person.phone}
+                          disabled={submitting}
+                          onChange={(e) => updatePerson(person.key, { phone: e.target.value })}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">ใช้สำหรับเข้าสู่ระบบ</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                          Line ID
+                        </label>
+                        <input
+                          className={inputClass}
+                          required
+                          value={person.line_id}
+                          disabled={submitting}
+                          onChange={(e) => updatePerson(person.key, { line_id: e.target.value })}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        E-mail
+                      </label>
+                      <input
+                        className={inputClass}
+                        required
+                        type="email"
+                        inputMode="email"
+                        value={person.email}
+                        disabled={submitting}
+                        onChange={(e) => updatePerson(person.key, { email: e.target.value })}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             <button
               type="button"
@@ -479,4 +853,3 @@ export default function RegisterFormPage() {
     </div>
   );
 }
-

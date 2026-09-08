@@ -17,7 +17,7 @@ export async function createClient() {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options)
             )
-          } catch (error) {
+          } catch {
             // ป้องกัน Error ตอนพยายามเซ็ต Cookie ผิดจังหวะ
           }
         },

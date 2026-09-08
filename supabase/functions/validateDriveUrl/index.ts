@@ -6,10 +6,10 @@ import { serve } from "https://deno.land/x/sift@0.5.0/mod.ts";
 
 export default serve(async (req) => {
   try {
-    const body = await req.json();
-    const { driveUrl } = body;
+    await req.json();
 
     // TODO: Implement validation logic.
+    // Expected body field: driveUrl
     // Example:
     // 1) Parse the drive file ID from driveUrl
     // 2) Call Google Drive API using a service account or API key

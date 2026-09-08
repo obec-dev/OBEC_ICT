@@ -32,8 +32,20 @@ function AdminsContent() {
   }, [adminToken]);
 
   useEffect(() => {
-    void reload().catch((err) => setError(err instanceof Error ? err.message : "โหลดไม่สำเร็จ"));
-  }, [reload]);
+    if (!adminToken) return;
+    let cancelled = false;
+    void adminList(adminToken).then(
+      (list) => {
+        if (!cancelled) setRows(list);
+      },
+      (err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "โหลดไม่สำเร็จ");
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [adminToken]);
 
   const createAdmin = async () => {
     if (!adminToken) return;

@@ -6,7 +6,7 @@ import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
 import { inputClass } from "@/lib/styles";
 import { extractYouTubeId, parseAnswerKeysCsv } from "@/lib/supabase/projects";
-import type { Candidate, ExamProgress, LearningProject, ProjectQuestion, ProjectVideo, QuestionType } from "@/types/ict";
+import type { LearningProject, ProjectQuestion, ProjectVideo, QuestionType } from "@/types/ict";
 
 function ProjectsManagementContent() {
   const {
@@ -79,7 +79,6 @@ function ProjectsManagementContent() {
   const [isEditingQ, setIsEditingQ] = useState(false);
 
   // CSV Answer Keys Upload State
-  const [csvContent, setCsvContent] = useState("");
   const [csvParsed, setCsvParsed] = useState<{ questionIdOrOrder: string; correctAnswer: string }[]>([]);
 
   // Grading Result Modal State
@@ -322,7 +321,6 @@ function ProjectsManagementContent() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result as string;
-      setCsvContent(text);
       const parsed = parseAnswerKeysCsv(text);
       setCsvParsed(parsed);
     };
@@ -337,7 +335,6 @@ function ProjectsManagementContent() {
     const res = await bulkSaveAnswerKeys(selectedProjectId, csvParsed);
     if (res.ok) {
       showStatus(`อัปเดตเฉลยคำตอบจาก CSV สำเร็จ ${res.updatedCount} ข้อ`);
-      setCsvContent("");
       setCsvParsed([]);
     } else {
       showStatus(res.error, true);

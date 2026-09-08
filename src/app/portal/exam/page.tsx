@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { UnsavedLeaveGuard } from "@/app/components/UnsavedLeaveGuard";
 import { useIctStore } from "@/contexts/IctStore";
-import { getProjectExamStatus, type PeriodStatus } from "@/lib/siteSettings";
+import { getProjectExamStatus } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
-import type { ProjectQuestion } from "@/types/ict";
+import type { ExamProgress, LearningProject, ProjectQuestion } from "@/types/ict";
 
 function answersEqual(a: Record<string, string>, b: Record<string, string>) {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
@@ -18,61 +18,38 @@ function answersEqual(a: Record<string, string>, b: Record<string, string>) {
   return true;
 }
 
-function ExamContent() {
-  const { currentCandidate, getExamFor, saveExamDraft, submitExam, projects, questions, activeProjectId, setActiveProjectId } =
-    useIctStore();
+type ExamWorkspaceProps = {
+  currentProject: LearningProject | undefined;
+  projectQuestions: ProjectQuestion[];
+  exam: ExamProgress | undefined;
+  locked: boolean;
+  projects: LearningProject[];
+  activeProjectId: string;
+  setActiveProjectId: (id: string) => void;
+  initialAnswers: Record<string, string>;
+  initialSavedAt: string | null;
+};
 
-  const currentProject = projects.find((p) => p.id === activeProjectId) || projects[0];
+function ExamWorkspace({
+  currentProject,
+  projectQuestions,
+  exam,
+  locked,
+  projects,
+  activeProjectId,
+  setActiveProjectId,
+  initialAnswers,
+  initialSavedAt,
+}: ExamWorkspaceProps) {
+  const { saveExamDraft, submitExam } = useIctStore();
 
-  // Anti-Cheating Sanitization: Candidate view omits correct_answer & model_answer
-  const projectQuestions: ProjectQuestion[] = useMemo(() => {
-    const raw = questions.filter((q) => q.project_id === (currentProject?.id || activeProjectId));
-    return raw.map((q) => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { correct_answer, model_answer, ...publicItem } = q;
-      return publicItem as ProjectQuestion;
-    });
-  }, [activeProjectId, currentProject?.id, questions]);
-
-  const exam = currentCandidate ? getExamFor(currentCandidate.id, currentProject?.id) : undefined;
-  const locked = exam?.status === "submitted";
-
-  const [answers, setAnswers] = useState<Record<string, string>>(exam?.answers ?? {});
-  const [lastSavedAnswers, setLastSavedAnswers] = useState<Record<string, string>>(exam?.answers ?? {});
-  const [savedAt, setSavedAt] = useState<string | null>(exam?.updated_at ?? null);
+  const [answers, setAnswers] = useState<Record<string, string>>(initialAnswers);
+  const [lastSavedAnswers, setLastSavedAnswers] = useState<Record<string, string>>(initialAnswers);
+  const [savedAt, setSavedAt] = useState<string | null>(initialSavedAt);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [examStatus, setExamStatus] = useState<PeriodStatus | null>(null);
-  const [periodLoading, setPeriodLoading] = useState(true);
-
-  useEffect(() => {
-    if (exam?.answers) {
-      setAnswers(exam.answers);
-      setLastSavedAnswers(exam.answers);
-      setSavedAt(exam.updated_at ?? null);
-    } else {
-      setAnswers({});
-      setLastSavedAnswers({});
-      setSavedAt(null);
-    }
-  }, [exam, activeProjectId]);
-
-  useEffect(() => {
-    if (currentProject) {
-      setExamStatus(getProjectExamStatus(currentProject));
-    } else {
-      setExamStatus({
-        open: false,
-        reason: "disabled",
-        start: null,
-        end: null,
-        message: "ไม่พบข้อมูลโครงการ",
-      });
-    }
-    setPeriodLoading(false);
-  }, [currentProject]);
 
   const isDirty = useMemo(
     () => !locked && !answersEqual(answers, lastSavedAnswers),
@@ -91,7 +68,6 @@ function ExamContent() {
       return false;
     }
     const status = getProjectExamStatus(currentProject);
-    setExamStatus(status);
     if (!status.open) {
       setSaveError(status.message);
       return false;
@@ -135,15 +111,6 @@ function ExamContent() {
     setSaveMessage("ส่งคำตอบเรียบร้อยแล้ว");
   };
 
-  if (periodLoading) {
-    return <div className="max-w-xl mx-auto px-4 py-16 text-center text-gray-500">กำลังตรวจสอบช่วงสอบ...</div>;
-  }
-
-  // Allow viewing submitted exams even after the window closes
-  if (examStatus && !examStatus.open && !locked) {
-    return <PeriodClosedNotice title="ยังไม่เปิดช่วงสอบ" status={examStatus} homeHref="/portal/learn" />;
-  }
-
   return (
     <div className="max-w-3xl mx-auto px-4 py-12 animate-fade-in-up">
       <UnsavedLeaveGuard
@@ -159,7 +126,6 @@ function ExamContent() {
         description="มีการแก้ไขคำตอบที่ยังไม่ได้บันทึก กด “บันทึก” เพื่อส่งร่างไปยังฐานข้อมูล หรือ “ไม่บันทึก” เพื่อคงร่างล่าสุดที่บันทึกไว้ก่อนหน้า"
       />
 
-      {/* Header Banner */}
       <div className="mb-8 bg-white/70 backdrop-blur-md p-6 rounded-3xl border border-white/60 shadow-sm">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
@@ -189,7 +155,6 @@ function ExamContent() {
           </div>
         </div>
 
-        {/* Graded Result Status Banner if exam has been evaluated */}
         {exam?.graded_at && (
           <div className="mt-4 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
             <div>
@@ -208,7 +173,6 @@ function ExamContent() {
           </div>
         )}
 
-        {/* Project Selector if multiple projects exist */}
         {projects.length > 1 && (
           <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-3">
             <span className="text-xs font-semibold text-gray-600">เลือกชุดข้อสอบ:</span>
@@ -232,7 +196,6 @@ function ExamContent() {
         )}
       </div>
 
-      {/* Question Cards */}
       {projectQuestions.length === 0 ? (
         <div className="bg-white rounded-2xl p-10 text-center text-gray-500 border border-gray-100 shadow-sm">
           ยังไม่มีคำถามในชุดข้อสอบนี้
@@ -252,7 +215,6 @@ function ExamContent() {
                 )}
               </div>
 
-              {/* Multiple Choice Question */}
               {question.type === "mcq" && question.options && (
                 <div className="space-y-2">
                   {question.options.map((option) => (
@@ -278,7 +240,6 @@ function ExamContent() {
                 </div>
               )}
 
-              {/* Open Ended Question */}
               {(question.type === "open_ended" || question.type === "short") && (
                 <div>
                   <textarea
@@ -350,6 +311,65 @@ function ExamContent() {
         </div>
       )}
     </div>
+  );
+}
+
+function ExamContent() {
+  const {
+    currentCandidate,
+    getExamFor,
+    projects,
+    questions,
+    activeProjectId,
+    setActiveProjectId,
+  } = useIctStore();
+
+  const currentProject = projects.find((p) => p.id === activeProjectId) || projects[0];
+
+  const projectQuestions: ProjectQuestion[] = useMemo(() => {
+    const raw = questions.filter((q) => q.project_id === (currentProject?.id || activeProjectId));
+    return raw.map((q) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { correct_answer, model_answer, ...publicItem } = q;
+      return publicItem as ProjectQuestion;
+    });
+  }, [activeProjectId, currentProject?.id, questions]);
+
+  const exam = currentCandidate ? getExamFor(currentCandidate.id, currentProject?.id) : undefined;
+  const locked = exam?.status === "submitted";
+
+  const examStatus = useMemo(() => {
+    if (!currentProject) {
+      return {
+        open: false,
+        reason: "disabled" as const,
+        start: null,
+        end: null,
+        message: "ไม่พบข้อมูลโครงการ",
+      };
+    }
+    return getProjectExamStatus(currentProject);
+  }, [currentProject]);
+
+  if (!examStatus.open && !locked) {
+    return <PeriodClosedNotice title="ยังไม่เปิดช่วงสอบ" status={examStatus} homeHref="/portal/learn" />;
+  }
+
+  const workspaceKey = `${currentCandidate?.id ?? "anon"}-${currentProject?.id ?? "none"}-${exam?.status ?? "none"}`;
+
+  return (
+    <ExamWorkspace
+      key={workspaceKey}
+      currentProject={currentProject}
+      projectQuestions={projectQuestions}
+      exam={exam}
+      locked={locked}
+      projects={projects}
+      activeProjectId={activeProjectId}
+      setActiveProjectId={setActiveProjectId}
+      initialAnswers={exam?.answers ?? {}}
+      initialSavedAt={exam?.updated_at ?? null}
+    />
   );
 }
 

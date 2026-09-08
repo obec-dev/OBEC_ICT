@@ -62,6 +62,19 @@ type RegisterInput = {
   last_name: string;
   phone: string;
   remark?: string;
+  title_key: string;
+  title_en: string;
+  title_th: string;
+  title_other_en?: string;
+  title_other_th?: string;
+  eng_first_name: string;
+  eng_last_name: string;
+  birth_date: string;
+  gender: string;
+  position: string;
+  duty: string;
+  line_id: string;
+  email: string;
 };
 
 type IctStoreValue = {
@@ -420,6 +433,19 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           phone: input.phone,
           remark: input.remark,
           pdpa_accepted: true,
+          title_key: input.title_key,
+          title_en: input.title_en,
+          title_th: input.title_th,
+          title_other_en: input.title_other_en,
+          title_other_th: input.title_other_th,
+          eng_first_name: input.eng_first_name,
+          eng_last_name: input.eng_last_name,
+          birth_date: input.birth_date,
+          gender: input.gender,
+          position: input.position,
+          duty: input.duty,
+          line_id: input.line_id,
+          email: input.email,
         });
 
         setCandidates((prev) => [candidate, ...prev.filter((c) => c.id !== candidate.id)]);

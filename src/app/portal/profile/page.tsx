@@ -1,42 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { useIctStore } from "@/contexts/IctStore";
 import { inputClass } from "@/lib/styles";
+import type { Candidate } from "@/types/ict";
 
-function ProfilePageContent() {
-  const { session, updateCandidateProfile } = useIctStore();
-  const candidate = session?.kind === "candidate" ? session.candidate : null;
+function ProfileForm({ candidate }: { candidate: Candidate }) {
+  const { updateCandidateProfile } = useIctStore();
 
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [remark, setRemark] = useState("");
+  const [firstName, setFirstName] = useState(candidate.first_name || "");
+  const [lastName, setLastName] = useState(candidate.last_name || "");
+  const [phone, setPhone] = useState(candidate.phone || "");
+  const [remark, setRemark] = useState(candidate.remark || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-
-  useEffect(() => {
-    if (candidate) {
-      setFirstName(candidate.first_name || "");
-      setLastName(candidate.last_name || "");
-      setPhone(candidate.phone || "");
-      setRemark(candidate.remark || "");
-    }
-  }, [candidate]);
-
-  if (!candidate) {
-    return (
-      <div className="max-w-xl mx-auto px-4 py-16 text-center">
-        <p className="text-gray-600 mb-4">โปรไฟล์นี้ใช้สำหรับผู้สมัครตัวแทน ICT Talent</p>
-        <Link href="/" className="px-6 py-2.5 bg-[var(--primary-blue)] text-white rounded-full font-bold">
-          กลับหน้าหลัก
-        </Link>
-      </div>
-    );
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,9 +116,7 @@ function ProfilePageContent() {
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              หมายเหตุเพิ่มเติม (ถ้ามี)
-            </label>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">หมายเหตุเพิ่มเติม (ถ้ามี)</label>
             <input
               type="text"
               className={inputClass}
@@ -148,8 +126,14 @@ function ProfilePageContent() {
             />
           </div>
 
-          {error && <p className="text-sm font-medium text-red-600 bg-red-50 p-3 rounded-xl border border-red-100">{error}</p>}
-          {success && <p className="text-sm font-medium text-emerald-600 bg-emerald-50 p-3 rounded-xl border border-emerald-100">{success}</p>}
+          {error && (
+            <p className="text-sm font-medium text-red-600 bg-red-50 p-3 rounded-xl border border-red-100">{error}</p>
+          )}
+          {success && (
+            <p className="text-sm font-medium text-emerald-600 bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+              {success}
+            </p>
+          )}
 
           <div className="pt-4 flex gap-4">
             <Link
@@ -169,6 +153,29 @@ function ProfilePageContent() {
         </form>
       </div>
     </div>
+  );
+}
+
+function ProfilePageContent() {
+  const { session } = useIctStore();
+  const candidate = session?.kind === "candidate" ? session.candidate : null;
+
+  if (!candidate) {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-16 text-center">
+        <p className="text-gray-600 mb-4">โปรไฟล์นี้ใช้สำหรับผู้สมัครตัวแทน ICT Talent</p>
+        <Link href="/" className="px-6 py-2.5 bg-[var(--primary-blue)] text-white rounded-full font-bold">
+          กลับหน้าหลัก
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <ProfileForm
+      key={`${candidate.id}:${candidate.first_name}:${candidate.last_name}:${candidate.phone}:${candidate.remark ?? ""}`}
+      candidate={candidate}
+    />
   );
 }
 

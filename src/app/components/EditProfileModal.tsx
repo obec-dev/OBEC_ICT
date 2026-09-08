@@ -1,36 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useIctStore } from "@/contexts/IctStore";
 import { inputClass } from "@/lib/styles";
+import type { Candidate, SessionUser } from "@/types/ict";
 
 type EditProfileModalProps = {
   isOpen: boolean;
   onClose: () => void;
 };
 
-export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
-  const { session, updateCandidateProfile } = useIctStore();
-  const candidate = session?.kind === "candidate" ? session.candidate : null;
+type EditProfileFormProps = {
+  session: SessionUser;
+  candidate: Candidate | null;
+  onClose: () => void;
+};
 
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [remark, setRemark] = useState("");
+function EditProfileForm({ session, candidate, onClose }: EditProfileFormProps) {
+  const { updateCandidateProfile } = useIctStore();
+
+  const [firstName, setFirstName] = useState(candidate?.first_name || "");
+  const [lastName, setLastName] = useState(candidate?.last_name || "");
+  const [phone, setPhone] = useState(candidate?.phone || "");
+  const [remark, setRemark] = useState(candidate?.remark || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-
-  useEffect(() => {
-    if (candidate) {
-      setFirstName(candidate.first_name || "");
-      setLastName(candidate.last_name || "");
-      setPhone(candidate.phone || "");
-      setRemark(candidate.remark || "");
-    }
-  }, [candidate, isOpen]);
-
-  if (!isOpen || !session) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,7 +62,6 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in">
       <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 md:p-8 border border-gray-100 relative animate-scale-up">
-        {/* Close Button */}
         <button
           type="button"
           onClick={onClose}
@@ -90,7 +84,6 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
 
         {candidate ? (
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Read only info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-100 text-xs">
               <div>
                 <span className="block font-medium text-gray-400 mb-0.5">เลขบัตรประชาชน (ล็อก)</span>
@@ -144,9 +137,7 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">
-                หมายเหตุเพิ่มเติม (ถ้ามี)
-              </label>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">หมายเหตุเพิ่มเติม (ถ้ามี)</label>
               <input
                 type="text"
                 className={inputClass}
@@ -156,8 +147,14 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
               />
             </div>
 
-            {error && <p className="text-sm font-medium text-red-600 bg-red-50 p-3 rounded-xl border border-red-100">{error}</p>}
-            {success && <p className="text-sm font-medium text-emerald-600 bg-emerald-50 p-3 rounded-xl border border-emerald-100">{success}</p>}
+            {error && (
+              <p className="text-sm font-medium text-red-600 bg-red-50 p-3 rounded-xl border border-red-100">{error}</p>
+            )}
+            {success && (
+              <p className="text-sm font-medium text-emerald-600 bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+                {success}
+              </p>
+            )}
 
             <div className="flex gap-3 pt-2">
               <button
@@ -192,5 +189,21 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
         )}
       </div>
     </div>
+  );
+}
+
+export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
+  const { session } = useIctStore();
+
+  if (!isOpen || !session) return null;
+
+  const candidate = session.kind === "candidate" ? session.candidate : null;
+  const formKey =
+    candidate != null
+      ? `${candidate.id}:${candidate.first_name}:${candidate.last_name}:${candidate.phone}:${candidate.remark ?? ""}`
+      : `session-${session.kind}`;
+
+  return (
+    <EditProfileForm key={formKey} session={session} candidate={candidate} onClose={onClose} />
   );
 }

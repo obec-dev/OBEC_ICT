@@ -5,10 +5,10 @@ import { serve } from "https://deno.land/x/sift@0.5.0/mod.ts";
 
 export default serve(async (req) => {
   try {
-    const body = await req.json();
-    const { filename, contentType } = body;
+    await req.json();
 
     // TODO: Implement Cloudflare R2 presigned URL generation.
+    // Expected body fields: filename, contentType
     // You can use @aws-sdk/client-s3 in Node.js or the R2 REST API.
 
     return new Response(JSON.stringify({

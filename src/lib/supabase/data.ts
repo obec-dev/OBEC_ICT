@@ -18,9 +18,25 @@ type ProfileRow = {
   last_name: string;
   phone: string;
   remark: string | null;
+  title_key?: string | null;
+  title_en?: string | null;
+  title_th?: string | null;
+  title_other_en?: string | null;
+  title_other_th?: string | null;
+  eng_first_name?: string | null;
+  eng_last_name?: string | null;
+  birth_date?: string | null;
+  gender?: string | null;
+  position?: string | null;
+  duty?: string | null;
+  line_id?: string | null;
+  email?: string | null;
   created_at: string | null;
   schools?: { school_name: string } | { school_name: string }[] | null;
 };
+
+const PROFILE_SELECT =
+  "profile_id, school_id, first_name, last_name, phone, remark, title_key, title_en, title_th, title_other_en, title_other_th, eng_first_name, eng_last_name, birth_date, gender, position, duty, line_id, email, created_at, schools(school_name)";
 
 function districtName(row: SchoolRow): string {
   const d = row.districts;
@@ -50,15 +66,31 @@ export function mapProfileRow(row: ProfileRow): Candidate {
     ? school[0]?.school_name
     : school?.school_name;
 
+  const titleTh = row.title_other_th || row.title_th || "";
+  const displayName = `${titleTh} ${row.first_name} ${row.last_name}`.trim();
+
   return {
     id: row.profile_id,
     school_id: row.school_id,
     school_name,
     first_name: row.first_name,
     last_name: row.last_name,
-    full_name: `${row.first_name} ${row.last_name}`.trim(),
+    full_name: displayName,
     phone: row.phone,
     remark: row.remark ?? undefined,
+    title_key: row.title_key ?? undefined,
+    title_en: row.title_en ?? undefined,
+    title_th: row.title_th ?? undefined,
+    title_other_en: row.title_other_en ?? undefined,
+    title_other_th: row.title_other_th ?? undefined,
+    eng_first_name: row.eng_first_name ?? undefined,
+    eng_last_name: row.eng_last_name ?? undefined,
+    birth_date: row.birth_date ?? undefined,
+    gender: row.gender ?? undefined,
+    position: row.position ?? undefined,
+    duty: row.duty ?? undefined,
+    line_id: row.line_id ?? undefined,
+    email: row.email ?? undefined,
     created_at: row.created_at ?? new Date().toISOString(),
   };
 }
@@ -194,7 +226,7 @@ export async function fetchAllProfiles(): Promise<Candidate[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("profile_id, school_id, first_name, last_name, phone, remark, created_at, schools(school_name)")
+    .select(PROFILE_SELECT)
     .order("created_at", { ascending: false });
 
   if (error) throw new Error(error.message);
@@ -204,11 +236,26 @@ export async function fetchAllProfiles(): Promise<Candidate[]> {
 export type RegisterProfileInput = {
   profile_id: string;
   school_id: string;
+  /** Thai given name */
   first_name: string;
+  /** Thai surname */
   last_name: string;
   phone: string;
   remark?: string;
   pdpa_accepted?: boolean;
+  title_key: string;
+  title_en: string;
+  title_th: string;
+  title_other_en?: string;
+  title_other_th?: string;
+  eng_first_name: string;
+  eng_last_name: string;
+  birth_date: string;
+  gender: string;
+  position: string;
+  duty: string;
+  line_id: string;
+  email: string;
 };
 
 type ExistingProfileCheck = {
@@ -280,8 +327,21 @@ export async function insertProfile(input: RegisterProfileInput): Promise<Candid
       phone: input.phone.trim(),
       remark: input.remark?.trim() || null,
       pdpa_accepted: input.pdpa_accepted ?? true,
+      title_key: input.title_key,
+      title_en: input.title_en.trim() || null,
+      title_th: input.title_th.trim() || null,
+      title_other_en: input.title_other_en?.trim() || null,
+      title_other_th: input.title_other_th?.trim() || null,
+      eng_first_name: input.eng_first_name.trim(),
+      eng_last_name: input.eng_last_name.trim(),
+      birth_date: input.birth_date,
+      gender: input.gender,
+      position: input.position.trim(),
+      duty: input.duty.trim(),
+      line_id: input.line_id.trim(),
+      email: input.email.trim().toLowerCase(),
     })
-    .select("profile_id, school_id, first_name, last_name, phone, remark, created_at, schools(school_name)")
+    .select(PROFILE_SELECT)
     .single();
 
   if (error) {
@@ -335,7 +395,7 @@ export async function findProfileForLogin(profileId: string, phone: string): Pro
   // 1. Try exact query first
   const { data: exactData, error: exactError } = await supabase
     .from("profiles")
-    .select("profile_id, school_id, first_name, last_name, phone, remark, created_at, schools(school_name)")
+    .select(PROFILE_SELECT)
     .eq("profile_id", rawId)
     .eq("phone", rawPhone)
     .maybeSingle();
@@ -348,7 +408,7 @@ export async function findProfileForLogin(profileId: string, phone: string): Pro
   const searchIds = [...new Set([rawId, digitsId].filter(Boolean))];
   const { data: candidatesData, error: searchError } = await supabase
     .from("profiles")
-    .select("profile_id, school_id, first_name, last_name, phone, remark, created_at, schools(school_name)")
+    .select(PROFILE_SELECT)
     .in("profile_id", searchIds);
 
   if (!searchError && candidatesData && candidatesData.length > 0) {

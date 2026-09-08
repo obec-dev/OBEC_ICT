@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cProfile) setProfile(JSON.parse(cProfile));
         if (cRoles) setUserRoles(JSON.parse(cRoles));
         if (cRole) _setCurrentRole(cRole);
-      } catch (e) {
+      } catch {
         console.error("Cache read error");
       }
     };
@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.setItem('auth_roles', JSON.stringify(rolesData));
           }
         }
-      } catch (error) {
+      } catch {
         if (mounted) {
           setUser(null);
           setProfile(null);
@@ -151,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.removeItem('auth_roles');
           setLoading(false);
         }
-      } catch (error) {
+      } catch {
         if (mounted) setLoading(false);
       }
     };

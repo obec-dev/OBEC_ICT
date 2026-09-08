@@ -7,9 +7,6 @@ import { useIctStore } from "@/contexts/IctStore";
 import { adminGetSettings, adminSaveSettings } from "@/lib/supabase/admin";
 import {
   datetimeLocalToIso,
-  formatDateTimeTh,
-  getExamStatus,
-  getRegistrationStatus,
   isoToDatetimeLocal,
   parseSiteSettings,
 } from "@/lib/siteSettings";
@@ -44,18 +41,6 @@ function ConfigContent() {
       .catch((err) => setError(err instanceof Error ? err.message : "โหลดตั้งค่าไม่สำเร็จ"))
       .finally(() => setLoading(false));
   }, [adminToken]);
-
-  const previewSettings = parseSiteSettings({
-    site_name: siteName,
-    registration_open: registrationOpen,
-    login_announce_message: announce,
-    registration_start: datetimeLocalToIso(registrationStart),
-    registration_end: datetimeLocalToIso(registrationEnd),
-    exam_start: datetimeLocalToIso(examStart),
-    exam_end: datetimeLocalToIso(examEnd),
-  });
-  const regStatus = getRegistrationStatus(previewSettings);
-  const examStatus = getExamStatus(previewSettings);
 
   const save = async () => {
     if (!adminToken) return;

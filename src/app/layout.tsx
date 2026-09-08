@@ -1,7 +1,15 @@
 import type { Metadata } from "next";
+import { Prompt } from "next/font/google";
 import "./globals.css";
 import { Nav } from "./components/Nav";
 import { IctStoreProvider } from "@/contexts/IctStore";
+
+const prompt = Prompt({
+  subsets: ["thai", "latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  display: "swap",
+  variable: "--font-prompt",
+});
 
 export const metadata: Metadata = {
   title: "ตัวแทน ICT Talent ประจำโรงเรียน",
@@ -17,17 +25,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="th">
+    <html lang="th" className={prompt.variable}>
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
         <link
           rel="stylesheet"
           href="https://cdn-uicons.flaticon.com/2.1.0/uicons-solid-rounded/css/uicons-solid-rounded.css"
         />
       </head>
-      <body className="antialiased font-[family-name:Prompt]">
+      <body className={`${prompt.className} antialiased`}>
         <IctStoreProvider>
           <div className="fixed inset-0 z-[-1] pointer-events-none overflow-hidden bg-[var(--background)]">
             <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[var(--primary-blue)] opacity-5 blur-3xl animate-float"></div>

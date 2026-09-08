@@ -14,7 +14,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: 'Prompt', sans-serif;
+  font-family: var(--font-prompt), "Prompt", sans-serif;
 }
 
 .bg-primary {

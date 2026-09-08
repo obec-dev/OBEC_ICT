@@ -26,11 +26,26 @@ export type Candidate = {
   id: string; // profile_id (เลขบัตรประชาชน)
   school_id: string;
   school_name?: string;
+  /** Thai given name (legacy primary display) */
   first_name: string;
+  /** Thai surname */
   last_name: string;
   full_name: string;
   phone: string;
   remark?: string;
+  title_key?: string;
+  title_en?: string;
+  title_th?: string;
+  title_other_en?: string;
+  title_other_th?: string;
+  eng_first_name?: string;
+  eng_last_name?: string;
+  birth_date?: string;
+  gender?: string;
+  position?: string;
+  duty?: string;
+  line_id?: string;
+  email?: string;
   created_at: string;
 };
 
