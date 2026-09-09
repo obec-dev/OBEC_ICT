@@ -95,17 +95,35 @@ export async function upsertProject(project: LearningProject): Promise<void> {
     exam_start: project.exam_start || null,
     exam_end: project.exam_end || null,
     exam_enabled: project.exam_enabled ?? true,
-    pass_threshold: project.pass_threshold ?? 3,
+    enable_results_visibility: project.enable_results_visibility === true,
+    pass_threshold_mode: project.pass_threshold_mode === "score" ? "score" : "percent",
+    pass_threshold_value:
+      typeof project.pass_threshold_value === "number"
+        ? project.pass_threshold_value
+        : project.pass_threshold ?? 60,
+    pass_threshold:
+      typeof project.pass_threshold_value === "number"
+        ? project.pass_threshold_value
+        : project.pass_threshold ?? 60,
     max_score: project.max_score ?? 5,
     updated_at: new Date().toISOString(),
   };
 
   let { error } = await supabase.from("projects").upsert(basePayload);
 
-  // Backward-compatible fallback before is_active/cover_url migration is applied
-  if (error && /is_active|cover_url|column/i.test(error.message)) {
-    const { is_active: _a, cover_url: _c, ...legacyPayload } = basePayload;
-    ({ error } = await supabase.from("projects").upsert(legacyPayload));
+  // Backward-compatible fallback before newer columns are applied
+  if (error && /pass_threshold_mode|pass_threshold_value|enable_results_visibility|is_active|cover_url|column/i.test(error.message)) {
+    const retryPayload = { ...basePayload } as Record<string, unknown>;
+    if (/pass_threshold_mode|pass_threshold_value/i.test(error.message)) {
+      delete retryPayload.pass_threshold_mode;
+      delete retryPayload.pass_threshold_value;
+    }
+    if (/enable_results_visibility/i.test(error.message)) {
+      delete retryPayload.enable_results_visibility;
+    }
+    if (/is_active/i.test(error.message)) delete retryPayload.is_active;
+    if (/cover_url/i.test(error.message)) delete retryPayload.cover_url;
+    ({ error } = await supabase.from("projects").upsert(retryPayload));
   }
 
   if (error) {
@@ -205,19 +223,16 @@ export function parseAnswerKeysCsv(csvText: string): { questionIdOrOrder: string
 
 /** Manual Grading Trigger via Supabase RPC or client fallback */
 export async function gradeProjectExamsRpc(projectId: string): Promise<{ graded_total: number; passed_total: number }> {
-  try {
-    const supabase = createClient();
-    const { data, error } = await supabase.rpc("grade_project_exams", { p_project_id: projectId });
-    if (!error && data) {
-      return {
-        graded_total: Number(data.graded_total) || 0,
-        passed_total: Number(data.passed_total) || 0,
-      };
-    }
-  } catch (e) {
-    console.warn("gradeProjectExamsRpc fallback:", e);
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("grade_project_exams", { p_project_id: projectId });
+  if (error) {
+    throw new Error(error.message);
   }
-
-  // Local/Store Fallback grading implementation:
+  if (data) {
+    return {
+      graded_total: Number(data.graded_total) || 0,
+      passed_total: Number(data.passed_total) || 0,
+    };
+  }
   return { graded_total: 0, passed_total: 0 };
 }

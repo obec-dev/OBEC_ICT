@@ -9,6 +9,7 @@ import { UnsavedLeaveGuard } from "@/app/components/UnsavedLeaveGuard";
 import { useIctStore } from "@/contexts/IctStore";
 import { getProjectExamStatus, getProjectLearningOpen, getSiteProject } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
+import { questionPoints } from "@/lib/numberInput";
 import type { ExamProgress, LearningProject, ProjectQuestion } from "@/types/ict";
 
 function answersEqual(a: Record<string, string>, b: Record<string, string>) {
@@ -41,6 +42,8 @@ function ExamWorkspace({
   const [answers, setAnswers] = useState<Record<string, string>>(initialAnswers);
   const [lastSavedAnswers, setLastSavedAnswers] = useState<Record<string, string>>(initialAnswers);
   const [savedAt, setSavedAt] = useState<string | null>(initialSavedAt);
+  /** hidden until first save in this session; then saved | dirty */
+  const [syncStatus, setSyncStatus] = useState<"hidden" | "saved" | "dirty">("hidden");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
@@ -57,6 +60,7 @@ function ExamWorkspace({
     setAnswers((prev) => ({ ...prev, [id]: value }));
     setSaveMessage("");
     setSaveError("");
+    setSyncStatus((prev) => (prev === "hidden" ? "dirty" : "dirty"));
   };
 
   const ensureExamOpen = (): boolean => {
@@ -88,10 +92,11 @@ function ExamWorkspace({
       }
       setLastSavedAnswers(answers);
       setSavedAt(new Date().toISOString());
-      setSaveMessage("บันทึกร่างไปยังเซิร์ฟเวอร์แล้ว");
+      setSyncStatus("saved");
+      setSaveMessage("บันทึกคำตอบล่าสุดแล้ว");
       return true;
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "บันทึกร่างไม่สำเร็จ");
+      setSaveError(err instanceof Error ? err.message : "บันทึกคำตอบไม่สำเร็จ");
       return false;
     } finally {
       setSaving(false);
@@ -130,8 +135,8 @@ function ExamWorkspace({
           setAnswers(lastSavedAnswers);
           setSaveMessage("ไม่บันทึกคำตอบปัจจุบัน — คงร่างล่าสุดที่บันทึกไว้");
         }}
-        title="บันทึกร่างข้อสอบก่อนออก?"
-        description="มีการแก้ไขคำตอบที่ยังไม่ได้บันทึก กด “บันทึก” เพื่อส่งร่างไปยังฐานข้อมูล หรือ “ไม่บันทึก” เพื่อคงร่างล่าสุดที่บันทึกไว้ก่อนหน้า"
+        title="บันทึกคำตอบก่อนออก?"
+        description="มีการแก้ไขคำตอบที่ยังไม่ได้บันทึก กด “บันทึก” เพื่อส่งคำตอบไปยังฐานข้อมูล หรือ “ไม่บันทึก” เพื่อคงคำตอบล่าสุดที่บันทึกไว้ก่อนหน้า"
       />
 
       <div className="mb-8 bg-white/70 backdrop-blur-md p-6 rounded-3xl border border-white/60 shadow-sm">
@@ -146,7 +151,7 @@ function ExamWorkspace({
             <p className="text-gray-500 text-sm mt-1">
               {locked
                 ? "ส่งคำตอบแล้ว ไม่สามารถแก้ไขได้"
-                : "สามารถทำข้อสอบได้ทันทีในช่วงเวลาที่เปิด — ระบบจะถามก่อนออกจากหน้าหากยังไม่บันทึก"}
+                : "ท่านสามารถบันทึกคำตอบแล้วกลับมาทำต่อภายหลังได้จนกว่าจะหมดช่วงเวลาสอบ"}
             </p>
           </div>
 
@@ -154,16 +159,16 @@ function ExamWorkspace({
             <Link href="/portal/learn" className="text-xs font-bold text-[var(--primary-blue)] hover:underline mb-1">
               ← กลับไปหน้าบทเรียน
             </Link>
-            {!locked && (
-              <>
-                {savedAt && <span className="text-sm text-[var(--accent-green)] font-semibold">บันทึกร่างล่าสุดแล้ว</span>}
-                {isDirty && <span className="text-xs text-amber-700 font-semibold">มีการแก้ไขยังไม่บันทึก</span>}
-              </>
+            {!locked && syncStatus === "saved" && (
+              <span className="text-sm text-[var(--accent-green)] font-semibold">บันทึกคำตอบล่าสุดแล้ว</span>
+            )}
+            {!locked && syncStatus === "dirty" && (
+              <span className="text-xs text-amber-700 font-semibold">มีการแก้ไขยังไม่บันทึก</span>
             )}
           </div>
         </div>
 
-        {exam?.graded_at && (
+        {exam?.graded_at && currentProject?.enable_results_visibility && (
           <div className="mt-4 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
             <div>
               <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">ผลการประเมินการทดสอบ:</span>
@@ -194,9 +199,14 @@ function ExamWorkspace({
                 <h2 className="font-bold text-gray-800 text-base md:text-lg">
                   {index + 1}. {question.prompt}
                 </h2>
-                {question.points && (
+                {questionPoints(question.points) > 0 && (
                   <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100 shrink-0 ml-2">
-                    {question.points} คะแนน
+                    {questionPoints(question.points)} คะแนน
+                  </span>
+                )}
+                {questionPoints(question.points) === 0 && (
+                  <span className="text-xs font-bold text-gray-500 bg-gray-50 px-2.5 py-1 rounded-full border border-gray-200 shrink-0 ml-2">
+                    ไม่คิดคะแนน
                   </span>
                 )}
               </div>
@@ -269,7 +279,7 @@ function ExamWorkspace({
             onClick={() => void commitDraft()}
             className="rounded-full border-2 border-[var(--primary-blue)] text-[var(--primary-blue)] px-8 py-3.5 font-bold disabled:opacity-40 hover:bg-blue-50 transition-all"
           >
-            {saving ? "กำลังบันทึก..." : "บันทึกร่าง"}
+            {saving ? "กำลังบันทึก..." : "บันทึกคำตอบ"}
           </button>
           <button
             type="button"
@@ -290,7 +300,7 @@ function ExamWorkspace({
           <div className="bg-white rounded-3xl p-8 shadow-2xl border border-gray-100 mx-auto">
             <h3 className="text-xl font-bold text-[var(--primary-blue)] mb-2">ยืนยันการส่งข้อสอบ?</h3>
             <p className="text-gray-600 text-sm mb-4">
-              หลังจากส่งข้อสอบแล้ว จะไม่สามารถแก้ไขคำตอบของวิชา {currentProject?.name || ""} ได้อีก
+              หลังจากส่งข้อสอบแล้ว จะไม่สามารถแก้ไขคำตอบได้อีก
             </p>
             {saveError && <p className="text-sm text-[var(--accent-red)] font-semibold mb-4">{saveError}</p>}
             <div className="flex gap-3 justify-end">

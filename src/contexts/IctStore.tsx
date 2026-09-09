@@ -148,7 +148,26 @@ type IctStoreValue = {
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
   updateCandidateProfile: (
     id: string,
-    patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>
+    patch: Partial<
+      Pick<
+        Candidate,
+        | "first_name"
+        | "last_name"
+        | "phone"
+        | "remark"
+        | "title_key"
+        | "title_en"
+        | "title_th"
+        | "title_other_en"
+        | "title_other_th"
+        | "eng_first_name"
+        | "eng_last_name"
+        | "position"
+        | "duty"
+        | "line_id"
+        | "email"
+      >
+    >
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
   adminDeleteCandidate: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   getWatchFor: (candidateId: string, videoId?: string) => WatchProgress | undefined;
@@ -357,17 +376,40 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   const gradeProjectExams = useCallback(
     async (projectId: string) => {
       try {
+        const projectQsAll = questions.filter((q) => q.project_id === projectId);
+        const gradedQs = projectQsAll.filter((q) => {
+          const pts = typeof q.points === "number" ? q.points : 1;
+          return pts > 0;
+        });
+        const missingKeys = gradedQs.filter((q) => !(q.correct_answer || "").trim());
+        if (missingKeys.length > 0) {
+          return {
+            ok: false as const,
+            error: "กรุณากำหนดเฉลยคำตอบให้ครบทุกข้อก่อนประมวลผล",
+          };
+        }
+
         const { gradeProjectExamsRpc } = await import("@/lib/supabase/projects");
-        const rpcResult = await gradeProjectExamsRpc(projectId);
+        let rpcResult = { graded_total: 0, passed_total: 0 };
+        try {
+          rpcResult = await gradeProjectExamsRpc(projectId);
+        } catch (rpcErr) {
+          const msg = rpcErr instanceof Error ? rpcErr.message : String(rpcErr);
+          if (/missing_answer_keys/i.test(msg)) {
+            return {
+              ok: false as const,
+              error: "กรุณากำหนดเฉลยคำตอบให้ครบทุกข้อก่อนประมวลผล",
+            };
+          }
+          throw rpcErr;
+        }
 
         const project = projects.find((p) => p.id === projectId);
-        const projectQs = questions.filter((q) => q.project_id === projectId && q.correct_answer);
         const maxScore =
-          questions.filter((q) => q.project_id === projectId).reduce((acc, q) => acc + (q.points || 1), 0) ||
+          gradedQs.reduce((acc, q) => acc + (typeof q.points === "number" ? q.points : 1), 0) ||
           project?.max_score ||
           5;
-        const { getPassScoreAbsolute } = await import("@/lib/siteSettings");
-        const passThreshold = getPassScoreAbsolute(project?.pass_threshold, maxScore);
+        const { isExamPassed } = await import("@/lib/siteSettings");
 
         let gradedCount = 0;
         let passedCount = 0;
@@ -378,18 +420,16 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
             if (exam.project_id && exam.project_id !== projectId && projectId !== "ict-talent-2026") return exam;
 
             let score = 0;
-            for (const q of projectQs) {
+            for (const q of gradedQs) {
               const candidateAns = (exam.answers[q.id] || "").trim();
               const correctAns = (q.correct_answer || "").trim();
 
               if (!candidateAns || !correctAns) continue;
 
-              // Check direct text match
               let isMatch = candidateAns === correctAns;
 
-              // If MCQ options exist, check option index matching (e.g., candidate selected option 2 or "ตัวเลือก 2")
               if (!isMatch && q.options && q.options.length > 0) {
-                const corrIndex = q.options.indexOf(correctAns) + 1; // 1-based index
+                const corrIndex = q.options.indexOf(correctAns) + 1;
                 const candIndex = q.options.indexOf(candidateAns) + 1;
 
                 if (String(candIndex) === correctAns || String(corrIndex) === candidateAns) {
@@ -398,10 +438,10 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
               }
 
               if (isMatch) {
-                score += q.points || 1;
+                score += typeof q.points === "number" ? q.points : 1;
               }
             }
-            const passed = score >= passThreshold;
+            const passed = isExamPassed(score, maxScore, project);
             gradedCount++;
             if (passed) passedCount++;
 
@@ -420,7 +460,14 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           passedCount: rpcResult.passed_total || passedCount,
         };
       } catch (err) {
-        return { ok: false as const, error: err instanceof Error ? err.message : "ตรวจข้อสอบไม่สำเร็จ" };
+        const msg = err instanceof Error ? err.message : "ตรวจข้อสอบไม่สำเร็จ";
+        if (/missing_answer_keys/i.test(msg)) {
+          return {
+            ok: false as const,
+            error: "กรุณากำหนดเฉลยคำตอบให้ครบทุกข้อก่อนประมวลผล",
+          };
+        }
+        return { ok: false as const, error: msg };
       }
     },
     [projects, questions]
@@ -769,38 +816,43 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateCandidateProfile = useCallback(
-    async (id: string, patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>) => {
+    async (
+      id: string,
+      patch: Partial<
+        Pick<
+          Candidate,
+          | "first_name"
+          | "last_name"
+          | "phone"
+          | "remark"
+          | "title_key"
+          | "title_en"
+          | "title_th"
+          | "title_other_en"
+          | "title_other_th"
+          | "eng_first_name"
+          | "eng_last_name"
+          | "position"
+          | "duty"
+          | "line_id"
+          | "email"
+        >
+      >
+    ) => {
       try {
         await updateProfile(id, patch);
-        setCandidates((prev) =>
-          prev.map((c) => {
-            if (c.id !== id) return c;
-            const first_name = patch.first_name ?? c.first_name;
-            const last_name = patch.last_name ?? c.last_name;
-            return {
-              ...c,
-              ...patch,
-              first_name,
-              last_name,
-              full_name: `${first_name} ${last_name}`.trim(),
-            };
-          })
-        );
+        const mergeCandidate = (c: Candidate): Candidate => {
+          const next = { ...c, ...patch };
+          const titleTh = next.title_other_th || next.title_th || "";
+          next.full_name = `${titleTh} ${next.first_name} ${next.last_name}`.trim();
+          return next;
+        };
+        setCandidates((prev) => prev.map((c) => (c.id === id ? mergeCandidate(c) : c)));
         setSession((prev) => {
           if (prev?.kind === "candidate" && prev.candidate.id === id) {
-            const first_name = patch.first_name ?? prev.candidate.first_name;
-            const last_name = patch.last_name ?? prev.candidate.last_name;
-            const updatedCand: Candidate = {
-              ...prev.candidate,
-              ...patch,
-              first_name,
-              last_name,
-              full_name: `${first_name} ${last_name}`.trim(),
-            };
-            if (typeof window !== "undefined") {
-              localStorage.setItem("ict_session_candidate", JSON.stringify(updatedCand));
-            }
-            return { ...prev, candidate: updatedCand };
+            const updated: SessionUser = { kind: "candidate", candidate: mergeCandidate(prev.candidate) };
+            writeSession(updated);
+            return updated;
           }
           return prev;
         });

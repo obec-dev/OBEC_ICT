@@ -32,7 +32,7 @@ export default function AdminLoginPage() {
       setError(result.error);
       return;
     }
-    router.push(result.mustChangePassword ? "/admin/change-password" : "/");
+    router.push(result.mustChangePassword ? "/admin/change-password" : "/admin");
   };
 
   return (

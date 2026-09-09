@@ -10,14 +10,18 @@ import { DEFAULT_PROJECT_ID } from "@/data/mockProjects";
 import {
   datetimeLocalToIso,
   formatDateTimeTh,
+  formatPassCriteriaLabel,
   getProjectExamStatus,
   getProjectRegistrationStatus,
   getSiteProject,
   isoToDatetimeLocal,
+  resolvePassThresholdMode,
+  resolvePassThresholdValue,
 } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
+import { numberInputGuards, sumGradedMaxScore } from "@/lib/numberInput";
 import { extractYouTubeId, parseAnswerKeysCsv } from "@/lib/supabase/projects";
-import type { LearningProject, ProjectQuestion, ProjectVideo, QuestionType } from "@/types/ict";
+import type { LearningProject, PassThresholdMode, ProjectQuestion, ProjectVideo, QuestionType } from "@/types/ict";
 
 function emptyProjectForm(): LearningProject {
   return {
@@ -28,6 +32,9 @@ function emptyProjectForm(): LearningProject {
     is_active: true,
     reg_enabled: true,
     exam_enabled: true,
+    enable_results_visibility: false,
+    pass_threshold_mode: "percent",
+    pass_threshold_value: 60,
     pass_threshold: 60,
     max_score: 5,
   };
@@ -108,7 +115,7 @@ function ProjectsManagementContent() {
   const currentProject = siteProject;
   const projectVideos = videos.filter((v) => v.project_id === selectedProjectId);
   const projectQuestions = questions.filter((q) => q.project_id === selectedProjectId);
-  const calculatedMaxScore = projectQuestions.reduce((acc, q) => acc + (q.points || 1), 0);
+  const calculatedMaxScore = sumGradedMaxScore(projectQuestions, 0);
 
   const projectExams = examProgress.filter(
     (e) => e.project_id === selectedProjectId || (!e.project_id && selectedProjectId === projects[0]?.id)
@@ -128,7 +135,13 @@ function ProjectsManagementContent() {
     }, 4000);
   };
 
-  const clampPassThreshold = (value: number) => Math.min(100, Math.max(1, value || 60));
+  const clampPassThreshold = (mode: PassThresholdMode, value: number, maxScoreHint: number) => {
+    if (mode === "score") {
+      const max = Math.max(0, maxScoreHint || 1);
+      return Math.min(max, Math.max(0, Number.isFinite(value) ? value : 0));
+    }
+    return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 60));
+  };
 
   // Export candidate exam data handlers
   const handleExportCsv = () => {
@@ -231,11 +244,17 @@ function ProjectsManagementContent() {
       showStatus("กรุณากรอกชื่อโครงการ", true);
       return;
     }
+    const mode = resolvePassThresholdMode(form);
+    const rawValue = resolvePassThresholdValue(form);
+    const maxScore = calculatedMaxScore > 0 ? calculatedMaxScore : form.max_score || 5;
+    const value = clampPassThreshold(mode, rawValue, maxScore);
     const payload: LearningProject = {
       ...form,
       id: form.id.trim() || DEFAULT_PROJECT_ID,
-      pass_threshold: clampPassThreshold(form.pass_threshold ?? 60),
-      max_score: calculatedMaxScore > 0 ? calculatedMaxScore : form.max_score || 5,
+      pass_threshold_mode: mode,
+      pass_threshold_value: value,
+      pass_threshold: value,
+      max_score: maxScore,
       reg_start: datetimeLocalToIso(form.reg_start || ""),
       reg_end: datetimeLocalToIso(form.reg_end || ""),
       exam_start: datetimeLocalToIso(form.exam_start || ""),
@@ -310,7 +329,7 @@ function ProjectsManagementContent() {
       correct_answer: qForm.type === "mcq" ? qForm.correct_answer : undefined,
       model_answer: qForm.type === "open_ended" ? qForm.model_answer.trim() : undefined,
       image_url: qForm.image_url.trim() || null,
-      points: Number(qForm.points) || 1,
+      points: Number.isFinite(Number(qForm.points)) ? Math.max(0, Number(qForm.points)) : 1,
       order_index: isEditingQ
         ? projectQuestions.find((q) => q.id === qForm.id)?.order_index ?? projectQuestions.length + 1
         : projectQuestions.length + 1,
@@ -418,42 +437,103 @@ function ProjectsManagementContent() {
           />
         </div>
 
-        <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-100">
+        <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-100 space-y-4">
           <ToggleSwitch
             id="proj-is-active"
-            label="สถานะหลัก (Master Active / Inactive)"
+            label="สถานะหลักของโครงการ"
             description="ปิด = ซ่อนทุกกิจกรรมของโครงการนี้ทั้งแพลตฟอร์ม"
             checked={form.is_active !== false}
             onChange={(next) => setForm((prev) => ({ ...prev, is_active: next }))}
           />
+          <ToggleSwitch
+            id="proj-results-visibility"
+            label="Publish Test Results"
+            description="เปิดเผยผลการสอบ/สถานะผ่านให้ผู้สมัครเห็น (รวมป้ายผ่านและข้อความแสดงความยินดี)"
+            checked={form.enable_results_visibility === true}
+            onChange={(next) => setForm((prev) => ({ ...prev, enable_results_visibility: next }))}
+          />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 p-4 bg-blue-50/50 rounded-2xl border border-blue-100">
+        <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 space-y-3">
           <div>
-            <label className="block text-xs font-bold text-[var(--primary-blue)] mb-1">เกณฑ์ผ่าน (%)</label>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              className={inputClass}
-              value={form.pass_threshold ?? 60}
-              onChange={(e) =>
-                setForm((prev) => ({
-                  ...prev,
-                  pass_threshold: clampPassThreshold(parseInt(e.target.value, 10)),
-                }))
-              }
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-[var(--primary-blue)] mb-1">คะแนนเต็ม (Max Score):</label>
-            <div className="flex items-center justify-between p-3 bg-white rounded-xl border border-blue-200 text-sm font-bold text-gray-800">
-              <span>{maxDisplay} คะแนน</span>
-              <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
-                คำนวณอัตโนมัติ
-              </span>
+            <label className="block text-xs font-bold text-[var(--primary-blue)] mb-2">โหมดเกณฑ์ผ่าน</label>
+            <div className="inline-flex rounded-xl border border-blue-200 bg-white p-1 gap-1">
+              {(
+                [
+                  { mode: "percent" as const, label: "ร้อยละ (%)" },
+                  { mode: "score" as const, label: "คะแนนจริง (Score)" },
+                ] as const
+              ).map((opt) => {
+                const active = resolvePassThresholdMode(form) === opt.mode;
+                return (
+                  <button
+                    key={opt.mode}
+                    type="button"
+                    onClick={() => {
+                      const nextValue = clampPassThreshold(
+                        opt.mode,
+                        resolvePassThresholdValue(form),
+                        maxDisplay
+                      );
+                      setForm((prev) => ({
+                        ...prev,
+                        pass_threshold_mode: opt.mode,
+                        pass_threshold_value: nextValue,
+                        pass_threshold: nextValue,
+                      }));
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                      active
+                        ? "bg-[var(--primary-solid)] text-white"
+                        : "text-gray-600 hover:bg-blue-50"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
-            <p className="text-[10px] text-gray-500 mt-1">คำนวณจากผลรวมคะแนนของทุกข้อสอบในวิชานี้</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-[var(--primary-blue)] mb-1">
+                {resolvePassThresholdMode(form) === "score" ? "เกณฑ์ผ่าน (คะแนน)" : "เกณฑ์ผ่าน (%)"}
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={resolvePassThresholdMode(form) === "score" ? Math.max(0, maxDisplay) : 100}
+                className={inputClass}
+                value={resolvePassThresholdValue(form)}
+                {...numberInputGuards}
+                onChange={(e) => {
+                  const mode = resolvePassThresholdMode(form);
+                  const next = clampPassThreshold(mode, parseInt(e.target.value, 10), maxDisplay);
+                  setForm((prev) => ({
+                    ...prev,
+                    pass_threshold_mode: mode,
+                    pass_threshold_value: next,
+                    pass_threshold: next,
+                  }));
+                }}
+              />
+              <p className="text-[10px] text-gray-500 mt-1">
+                {resolvePassThresholdMode(form) === "score"
+                  ? `(กำหนดคะแนนขั้นต่ำที่ต้องได้จากคะแนนเต็ม ${maxDisplay})`
+                  : "(คำนวณจากเปอร์เซ็นต์คะแนนเต็ม)"}
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-[var(--primary-blue)] mb-1">คะแนนเต็ม:</label>
+              <div className="flex items-center justify-between p-3 bg-white rounded-xl border border-blue-200 text-sm font-bold text-gray-800">
+                <span>{maxDisplay} คะแนน</span>
+                <span className="text-[10px] font-semibold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                  คำนวณอัตโนมัติ
+                </span>
+              </div>
+              <p className="text-[10px] text-gray-500 mt-1">คำนวณจากผลรวมคะแนนของข้อที่คิดคะแนน (points &gt; 0)</p>
+            </div>
           </div>
         </div>
 
@@ -531,27 +611,13 @@ function ProjectsManagementContent() {
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-extrabold text-[var(--primary-blue)]">จัดการวิชา & ระบบตรวจข้อสอบ (Anti-Cheating)</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            บริหารจัดการโครงการเดียวของเว็บไซต์ — กำหนดการ, คลิปวิดีโอ, Exam Builder, Answer Keys และระบบตรวจข้อสอบ
+          <h1 className="text-3xl font-extrabold text-[var(--primary-blue)]">จัดการ - โครงการ</h1>
+          <p className="text-gray-500 dark:text-slate-400 text-sm mt-1">
+            บริหารจัดการโครงการ, กำหนดการ, คลิปวิดีโอ, ข้อสอบ และ คำตอบ
           </p>
         </div>
         {currentProject && (
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              className="rounded-full bg-blue-600 text-white px-4 py-2.5 font-bold text-xs hover:bg-blue-700 shadow transition-all flex items-center gap-1.5"
-            >
-              <span>📥 Export Answers (CSV)</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleExportJson}
-              className="rounded-full bg-indigo-600 text-white px-4 py-2.5 font-bold text-xs hover:bg-indigo-700 shadow transition-all flex items-center gap-1.5"
-            >
-              <span>📥 Export Answers (JSON)</span>
-            </button>
             <button
               type="button"
               disabled={isGrading}
@@ -618,7 +684,7 @@ function ProjectsManagementContent() {
               <span className="bg-blue-100/70 text-blue-800 px-2 py-0.5 rounded">📹 {projectVideos.length} วิดีโอ</span>
               <span className="bg-purple-100/70 text-purple-800 px-2 py-0.5 rounded">📝 {projectQuestions.length} ข้อสอบ</span>
               <span className="bg-emerald-100/70 text-emerald-800 px-2 py-0.5 rounded">
-                เกณฑ์ผ่าน {currentProject.pass_threshold ?? 60}%
+                เกณฑ์ผ่าน {formatPassCriteriaLabel(currentProject)}
               </span>
             </div>
           </div>
@@ -657,7 +723,7 @@ function ProjectsManagementContent() {
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
-                ✍️ Exam Builder (สร้างโจทย์) ({projectQuestions.length})
+                ✍️ สร้างโจทย์คำถาม ({projectQuestions.length})
               </button>
               <button
                 type="button"
@@ -668,7 +734,7 @@ function ProjectsManagementContent() {
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
-                🔑 Answer Keys (เฉลย & ตรวจคำตอบ)
+                🔑 สร้างคำตอบ
               </button>
             </div>
 
@@ -679,7 +745,7 @@ function ProjectsManagementContent() {
                   <div className="flex justify-between items-start mb-6">
                     <div>
                       <h2 className="text-2xl font-bold text-gray-800 mb-1">{currentProject.name}</h2>
-                      <p className="text-gray-500 text-sm">รหัสวิชา/โครงการ: {currentProject.id}</p>
+                      <p className="text-gray-500 text-sm">รหัสโครงการ: {currentProject.id}</p>
                     </div>
                     <button
                       type="button"
@@ -687,7 +753,9 @@ function ProjectsManagementContent() {
                         setProjForm({
                           ...currentProject,
                           max_score: calculatedMaxScore > 0 ? calculatedMaxScore : currentProject.max_score || 5,
-                          pass_threshold: currentProject.pass_threshold ?? 60,
+                          pass_threshold_mode: resolvePassThresholdMode(currentProject),
+                          pass_threshold_value: resolvePassThresholdValue(currentProject),
+                          pass_threshold: resolvePassThresholdValue(currentProject),
                           reg_start: isoToDatetimeLocal(currentProject.reg_start ?? null) || null,
                           reg_end: isoToDatetimeLocal(currentProject.reg_end ?? null) || null,
                           exam_start: isoToDatetimeLocal(currentProject.exam_start ?? null) || null,
@@ -711,8 +779,8 @@ function ProjectsManagementContent() {
                   >
                     <ToggleSwitch
                       id="master-active-quick"
-                      label="สถานะหลักของโครงการ (Master Status)"
-                      description="ปิดใช้งาน (Inactive) จะซ่อนโครงการจาก Carousel หน้าแรก, เมนูลงทะเบียน, บทเรียน และล็อกการเข้าสอบ/ส่งคำตอบ"
+                      label="สถานะหลักของโครงการ"
+                      description="ใช้เพื่อเปิดปิดทุกอย่างของโครงการนี้ (ระยะที่ไม่มีการสมัครหรือสอบ)"
                       checked={currentProject.is_active !== false}
                       onChange={(next) => {
                         void (async () => {
@@ -732,26 +800,51 @@ function ProjectsManagementContent() {
                         })();
                       }}
                     />
+                    <div className="mt-4 pt-4 border-t border-emerald-200/60">
+                      <ToggleSwitch
+                        id="results-visibility-quick"
+                        label="Publish Test Results"
+                        description="เปิดเผยผลการสอบให้ผู้สมัครเห็นทั่วทั้งไซต์"
+                        checked={currentProject.enable_results_visibility === true}
+                        onChange={(next) => {
+                          void (async () => {
+                            const res = await saveProject({
+                              ...currentProject,
+                              enable_results_visibility: next,
+                            });
+                            if (res.ok) {
+                              showStatus(
+                                next
+                                  ? "เปิดเผยผลการสอบให้ผู้สมัครแล้ว"
+                                  : "ซ่อนผลการสอบจากผู้สมัครแล้ว"
+                              );
+                            } else {
+                              showStatus(res.error, true);
+                            }
+                          })();
+                        }}
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     <div className="bg-gray-50 p-6 rounded-2xl border border-gray-100">
-                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">รายละเอียดวิชา:</h4>
+                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">รายละเอียดโครงการ</h4>
                       <p className="text-gray-700 leading-relaxed text-sm">{currentProject.description || "ยังไม่มีรายละเอียด"}</p>
                     </div>
 
                     <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 space-y-3">
                       <h4 className="text-xs font-bold text-[var(--primary-blue)] uppercase tracking-wider">
-                        เกณฑ์การให้คะแนนและการผ่าน:
+                        เกณฑ์การให้คะแนน
                       </h4>
                       <div className="flex justify-between items-center text-sm border-b border-blue-100 pb-2">
-                        <span className="text-gray-600">เกณฑ์ผ่าน (Pass Threshold):</span>
+                        <span className="text-gray-600">เกณฑ์ผ่าน:</span>
                         <span className="font-extrabold text-[var(--primary-blue)]">
-                          {currentProject.pass_threshold ?? 60}%
+                          {formatPassCriteriaLabel(currentProject)}
                         </span>
                       </div>
                       <div className="flex justify-between items-center text-sm">
-                        <span className="text-gray-600">คะแนนเต็มวิชานี้ (Max Score):</span>
+                        <span className="text-gray-600">คะแนนเต็ม:</span>
                         <span className="font-bold text-gray-800">
                           {calculatedMaxScore > 0 ? calculatedMaxScore : currentProject.max_score ?? 5} คะแนน
                         </span>
@@ -768,7 +861,7 @@ function ProjectsManagementContent() {
                         <>
                           <div className="bg-amber-50/60 p-6 rounded-2xl border border-amber-200">
                             <div className="flex items-center justify-between mb-3">
-                              <h4 className="font-bold text-amber-900 text-sm">🗓️ ช่วงเปิดรับลงทะเบียนประจำวิชา</h4>
+                              <h4 className="font-bold text-amber-900 text-sm">🗓️ ช่วงเปิดรับลงทะเบียน</h4>
                               <span
                                 className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
                                   regLive.open ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
@@ -779,7 +872,7 @@ function ProjectsManagementContent() {
                             </div>
                             <p className="text-xs text-gray-600 mb-2">{regLive.message}</p>
                             <p className="text-xs text-gray-600">
-                              สวิตช์: {currentProject.reg_enabled ? "เปิด" : "ปิด"}
+                              สถานะ: {currentProject.reg_enabled ? "เปิด" : "ปิด"}
                             </p>
                             <p className="text-xs text-gray-600">
                               เริ่ม: {currentProject.reg_start ? formatDateTimeTh(currentProject.reg_start) : (
@@ -787,7 +880,7 @@ function ProjectsManagementContent() {
                                   ยังไม่กำหนดวัน
                                 </span>
                               )}
-                              {!currentProject.reg_start && currentProject.reg_enabled ? " (เปิดตลอดจนกว่าจะปิดสวิตช์)" : ""}
+                              {!currentProject.reg_start && currentProject.reg_enabled ? "" : ""}
                             </p>
                             <p className="text-xs text-gray-600 mt-1">
                               สิ้นสุด: {currentProject.reg_end ? formatDateTimeTh(currentProject.reg_end) : (
@@ -800,7 +893,7 @@ function ProjectsManagementContent() {
 
                           <div className="bg-purple-50/60 p-6 rounded-2xl border border-purple-200">
                             <div className="flex items-center justify-between mb-3">
-                              <h4 className="font-bold text-purple-900 text-sm">✍️ ช่วงเปิดเข้าสอบประจำวิชา</h4>
+                              <h4 className="font-bold text-purple-900 text-sm">✍️ ช่วงเปิดเข้าสอบ</h4>
                               <span
                                 className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
                                   examLive.open ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
@@ -811,7 +904,7 @@ function ProjectsManagementContent() {
                             </div>
                             <p className="text-xs text-gray-600 mb-2">{examLive.message}</p>
                             <p className="text-xs text-gray-600">
-                              สวิตช์: {currentProject.exam_enabled ? "เปิด" : "ปิด"}
+                              สถานะ: {currentProject.exam_enabled ? "เปิด" : "ปิด"}
                             </p>
                             <p className="text-xs text-gray-600">
                               เริ่ม: {currentProject.exam_start ? formatDateTimeTh(currentProject.exam_start) : (
@@ -819,7 +912,7 @@ function ProjectsManagementContent() {
                                   ยังไม่กำหนดวัน
                                 </span>
                               )}
-                              {!currentProject.exam_start && currentProject.exam_enabled ? " (เปิดตลอดจนกว่าจะปิดสวิตช์)" : ""}
+                              {!currentProject.exam_start && currentProject.exam_enabled ? "" : ""}
                             </p>
                             <p className="text-xs text-gray-600 mt-1">
                               สิ้นสุด: {currentProject.exam_end ? formatDateTimeTh(currentProject.exam_end) : (
@@ -842,7 +935,7 @@ function ProjectsManagementContent() {
                   <div className="flex justify-between items-center mb-6">
                     <div>
                       <h2 className="text-xl font-bold text-gray-800">วิดีโอบทเรียน ({projectVideos.length})</h2>
-                      <p className="text-xs text-gray-500">จัดการลิงก์วิดีโอ YouTube พร้อมสวิตช์เปิด/ปิด flag “Mandatory for Exam”</p>
+                      <p className="text-xs text-gray-500">จัดการลิงก์วิดีโอ YouTube</p>
                     </div>
                     <button
                       type="button"
@@ -935,7 +1028,7 @@ function ProjectsManagementContent() {
                 <div>
                   <div className="flex justify-between items-center mb-6">
                     <div>
-                      <h2 className="text-xl font-bold text-gray-800">Exam Builder (สร้างโจทย์ข้อสอบ)</h2>
+                      <h2 className="text-xl font-bold text-gray-800">สร้างโจทย์คำถาม</h2>
                       <p className="text-xs text-gray-500">
                         สร้างคำถามและตัวเลือก (ผู้สมัครจะไม่เห็นเฉลยคำตอบในหน้าสอบ เพื่อป้องกันการเจาะ DevTools)
                       </p>
@@ -983,10 +1076,10 @@ function ProjectsManagementContent() {
                                     : "bg-amber-50 text-amber-700 border border-amber-200"
                                 }`}
                               >
-                                {q.type === "mcq" ? "Multiple Choice (MCQ)" : "Open-ended (อัตนัย)"}
+                                {q.type === "mcq" ? "choice" : "open"}
                               </span>
                               <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2.5 py-0.5 rounded-md">
-                                {q.points || 1} คะแนน
+                                {typeof q.points === "number" ? q.points : 1} คะแนน
                               </span>
                             </div>
 
@@ -1003,7 +1096,7 @@ function ProjectsManagementContent() {
                                     correct_answer: q.correct_answer || "1",
                                     model_answer: q.model_answer || "",
                                     image_url: q.image_url || "",
-                                    points: q.points || 1,
+                                    points: typeof q.points === "number" ? q.points : 1,
                                   });
                                   setIsEditingQ(true);
                                   setShowQuestionModal(true);
@@ -1047,30 +1140,43 @@ function ProjectsManagementContent() {
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                     <div>
                       <h2 className="text-xl font-bold text-emerald-900 flex items-center gap-2">
-                        <span>🔑 Answer Key Configuration (การจัดการเฉลยคำตอบ)</span>
-                        <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
-                          🔒 Backend Secure Only
-                        </span>
+                        <span>🔑 การจัดการเฉลยคำตอบ</span>
                       </h2>
                       <p className="text-xs text-gray-500 mt-1">
-                        ตั้งค่าเฉลยคำตอบเป็นหมายเลขข้อ (1, 2, 3, 4) เพื่อรองรับการนำเข้า CSV และป้องกันการเปลี่ยนข้อความตัวเลือก
+                        จัดการตั้งค่าคำตอบรายข้อ
                       </p>
                     </div>
 
-                    <button
-                      type="button"
-                      disabled={isGrading}
-                      onClick={() => void handleTriggerGrading()}
-                      className="px-6 py-2.5 rounded-full bg-emerald-600 text-white font-bold text-sm shadow hover:bg-emerald-700 disabled:opacity-40"
-                    >
-                      {isGrading ? "กำลังประมวลผล..." : "⚡ เริ่มตรวจคำตอบ (Grade Exams Now)"}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleExportCsv}
+                        className="px-4 py-2.5 rounded-full bg-blue-600 text-white font-bold text-xs shadow hover:bg-blue-700"
+                      >
+                        📥 Export Answers (CSV)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExportJson}
+                        className="px-4 py-2.5 rounded-full bg-indigo-600 text-white font-bold text-xs shadow hover:bg-indigo-700"
+                      >
+                        📥 Export Answers (JSON)
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isGrading}
+                        onClick={() => void handleTriggerGrading()}
+                        className="px-6 py-2.5 rounded-full bg-emerald-600 text-white font-bold text-sm shadow hover:bg-emerald-700 disabled:opacity-40"
+                      >
+                        {isGrading ? "กำลังประมวลผล..." : "⚡ เริ่มตรวจคำตอบ (Grade Exams Now)"}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="bg-emerald-50/50 p-6 rounded-2xl border border-emerald-200 mb-8">
                     <h3 className="font-bold text-emerald-900 text-base mb-2">📁 อัปโหลดเฉลยคำตอบผ่านไฟล์ CSV</h3>
                     <p className="text-xs text-gray-600 mb-4">
-                      รูปแบบ CSV 2 คอลัมน์: <code>ลำดับข้อ,หมายเลขตัวเลือก</code> (ตัวอย่าง: <code>1,2</code> หรือ <code>2,4</code> หรือ <code>3,1</code>)
+                      รูปแบบ CSV จะเป็น 2 คอลัมน์: <code>ลำดับข้อ,หมายเลขตัวเลือก</code> (ตัวอย่าง: <code>1,2</code> หรือ <code>2,4</code> หรือ <code>3,1</code>)
                     </p>
 
                     <div className="flex flex-col sm:flex-row items-center gap-3">
@@ -1107,7 +1213,7 @@ function ProjectsManagementContent() {
                     )}
                   </div>
 
-                  <h3 className="font-bold text-gray-800 text-lg mb-4">📝 กำหนดเฉลยคำตอบรายข้อ (Manual Answer Key Entry)</h3>
+                  <h3 className="font-bold text-gray-800 text-lg mb-4">📝 กำหนดเฉลยคำตอบรายข้อ</h3>
                   <div className="space-y-4">
                     {projectQuestions.map((q, idx) => {
                       const selectedChoice = (() => {
@@ -1116,13 +1222,15 @@ function ProjectsManagementContent() {
                         const matchIdx = q.options?.indexOf(q.correct_answer);
                         return matchIdx !== undefined && matchIdx >= 0 ? String(matchIdx + 1) : q.correct_answer;
                       })();
+                      const typeLabel = q.type === "mcq" ? "choice" : "open";
 
                       return (
                         <div key={q.id} className="p-5 rounded-2xl border border-gray-200 bg-white flex flex-col md:flex-row md:items-center justify-between gap-4">
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-1">
-                              <span className="font-bold text-sm text-[var(--primary-blue)]">ข้อที่ {idx + 1} ({q.id})</span>
-                              <span className="text-xs text-gray-400">[{q.type.toUpperCase()}]</span>
+                              <span className="font-bold text-sm text-[var(--primary-blue)]">
+                                ข้อที่ {idx + 1} [{typeLabel}]
+                              </span>
                             </div>
                             <p className="text-sm font-semibold text-gray-700">{q.prompt}</p>
                           </div>
@@ -1324,11 +1432,17 @@ function ProjectsManagementContent() {
                 <label className="block text-xs font-bold text-gray-700 mb-1">คะแนนเต็มของข้อนี้:</label>
                 <input
                   type="number"
-                  min="1"
+                  min={0}
                   className={`${inputClass} max-w-32`}
                   value={qForm.points}
-                  onChange={(e) => setQForm((prev) => ({ ...prev, points: parseInt(e.target.value) || 1 }))}
+                  {...numberInputGuards}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const n = raw === "" ? 0 : parseInt(raw, 10);
+                    setQForm((prev) => ({ ...prev, points: Number.isNaN(n) ? 0 : Math.max(0, n) }));
+                  }}
                 />
+                <p className="text-[11px] text-gray-500 mt-1">ตั้งเป็น 0 สำหรับข้อสอบแบบสำรวจ/ไม่คิดคะแนน</p>
               </div>
 
               {qForm.type === "mcq" && (

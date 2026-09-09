@@ -51,6 +51,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen overflow-hidden">
+      {/* 1. Hero */}
       <section className="relative bg-[var(--primary-blue)] pt-24 pb-40 px-4">
         <div className="absolute top-0 right-0 w-full h-full opacity-10 pointer-events-none flex justify-end animate-float">
           <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="w-[800px] h-[800px] -mr-40 -mt-20 transform rotate-12">
@@ -90,10 +91,10 @@ export default function Home() {
             <div className="flex flex-col sm:flex-row gap-4 pt-4 justify-center md:flex-wrap md:justify-start">
               {hydrated && session ? (
                 <Link
-                  href={session.kind === "admin" ? "/admin" : "/portal/learn"}
+                  href={session.kind === "admin" ? "/admin" : "/portal/profile"}
                   className="bg-[var(--accent-green)] text-white px-8 py-4 rounded-full text-lg font-bold hover:bg-green-600 transition-all duration-300 shadow-xl hover:shadow-green-900/50 hover:-translate-y-1 active:translate-y-0 flex items-center justify-center gap-2"
                 >
-                  เข้าสู่พอร์ทัล
+                  {session.kind === "admin" ? "เข้าสู่ศูนย์ผู้ดูแล" : "จัดการโปรไฟล์"}
                 </Link>
               ) : regStatus && !regStatus.open ? (
                 <span className="bg-white/15 text-white/80 px-8 py-4 rounded-full text-lg font-bold flex items-center justify-center gap-2 cursor-not-allowed">
@@ -119,10 +120,7 @@ export default function Home() {
         </div>
       </section>
 
-      {hydrated && (
-        <ProjectCoverFlow projects={projects} hasSession={Boolean(session && session.kind === "candidate")} />
-      )}
-
+      {/* 2. Impact metrics */}
       <section
         className="max-w-6xl mx-auto px-4 relative z-20 -mt-4 mb-12 animate-fade-in-up"
         style={{ animationDelay: "0.2s", animationFillMode: "both" }}
@@ -150,14 +148,23 @@ export default function Home() {
         </div>
       </section>
 
+      {/* 3. Project carousel */}
+      {hydrated && (
+        <ProjectCoverFlow projects={projects} hasSession={Boolean(session && session.kind === "candidate")} />
+      )}
+
+      {/* 4. Schedule timeline */}
       {hydrated && <ProjectScheduleNotice projects={projects} />}
 
+      {/* 5. Registration steps */}
       <section
         className="max-w-7xl mx-auto px-4 py-16 text-center animate-fade-in-up"
         style={{ animationDelay: "0.4s", animationFillMode: "both" }}
       >
         <h2 className="text-3xl font-bold text-[var(--primary-blue)] mb-4">ขั้นตอนการคัดเลือก</h2>
-        <p className="text-gray-500 mb-12">ลงทะเบียนหนึ่งครั้งต่อโรงเรียน จากนั้นเรียนรู้และสอบในพอร์ทัล</p>
+        <p className="text-gray-500 dark:text-slate-400 mb-12">
+          ลงทะเบียนและตรวจสอบกำหนดการเพื่อเข้าร่วมการทดสอบคัดเลือก
+        </p>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           {[

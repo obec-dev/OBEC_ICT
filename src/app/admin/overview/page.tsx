@@ -5,8 +5,12 @@ import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
-import { getPassScoreAbsolute, getSiteProject } from "@/lib/siteSettings";
-import { adminOverviewStats, type AdminOverviewStats } from "@/lib/supabase/admin";
+import { getSiteProject } from "@/lib/siteSettings";
+import {
+  adminOverviewStats,
+  isAdminUnauthorized,
+  type AdminOverviewStats,
+} from "@/lib/supabase/admin";
 
 function StatCard({
   label,
@@ -135,7 +139,7 @@ function DonutChart({
 }
 
 function OverviewContent() {
-  const { adminToken, projects, examProgress, candidates, questions } = useIctStore();
+  const { adminToken, projects, examProgress, candidates, logout } = useIctStore();
   const [stats, setStats] = useState<AdminOverviewStats | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -147,9 +151,15 @@ function OverviewContent() {
     if (!adminToken) return;
     void adminOverviewStats(adminToken)
       .then(setStats)
-      .catch((err) => setError(err instanceof Error ? err.message : "โหลดภาพรวมไม่สำเร็จ"))
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "โหลดภาพรวมไม่สำเร็จ");
+        if (isAdminUnauthorized(err)) {
+          // Stale localStorage token vs expired/missing admin_sessions row
+          window.setTimeout(() => logout(), 1200);
+        }
+      })
       .finally(() => setLoading(false));
-  }, [adminToken]);
+  }, [adminToken, logout]);
 
   const eligible = candidates.length || (stats?.profiles_total ?? 0);
   const projectExams = examProgress.filter(
@@ -158,19 +168,14 @@ function OverviewContent() {
   const draftCount = projectExams.filter((e) => e.status === "draft").length;
   const finishedCount = projectExams.filter((e) => e.status === "submitted").length;
   const inProgressCount = draftCount;
-  const passedCount = projectExams.filter((e) => e.status === "submitted" && e.passed === true).length;
+  const passedCount = projectExams.filter(
+    (e) => e.status === "submitted" && Boolean(e.graded_at) && e.passed === true
+  ).length;
   const failedCount = projectExams.filter(
-    (e) => e.status === "submitted" && e.passed === false
+    (e) => e.status === "submitted" && Boolean(e.graded_at) && e.passed === false
   ).length;
   const notTakenCount = Math.max(0, eligible - finishedCount - inProgressCount);
 
-  const maxScore =
-    questions
-      .filter((q) => !projectId || q.project_id === projectId)
-      .reduce((acc, q) => acc + (q.points || 1), 0) ||
-    siteProject?.max_score ||
-    5;
-  const passScore = getPassScoreAbsolute(siteProject?.pass_threshold, maxScore);
   const pct =
     stats && stats.schools_total > 0 ? Math.round((stats.schools_registered / stats.schools_total) * 100) : 0;
 
@@ -180,10 +185,9 @@ function OverviewContent() {
 
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">แดชบอร์ดผู้ดูแลระบบ</h1>
-          <p className="text-gray-500">
-            Part 1: ภาพรวมลงทะเบียน · Part 2: ติดตามการสอบ
-            {siteProject ? ` (${siteProject.name})` : ""}
+          <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">ภาพรวมผู้ดูแลระบบ</h1>
+          <p className="text-gray-500 dark:text-slate-400">
+            {siteProject ? siteProject.name : "ติดตามการลงทะเบียนและผลการทดสอบ"}
           </p>
         </div>
         <Link href="/dashboard" className="text-sm font-bold text-[var(--primary-blue)] underline">
@@ -202,8 +206,8 @@ function OverviewContent() {
         <>
           {/* Part 1 */}
           <section className="mb-12">
-            <h2 className="text-xl font-extrabold text-[var(--primary-blue)] mb-1">Part 1: Registration Overview</h2>
-            <p className="text-xs text-gray-500 mb-4">ภาพรวมการลงทะเบียนโรงเรียนและผู้สมัครทั้งระบบ</p>
+            <h2 className="text-xl font-extrabold text-[var(--primary-blue)] mb-1">ติดตามการลงทะเบียน</h2>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">ภาพรวมการลงทะเบียนโรงเรียนและผู้สมัครทั้งระบบ</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
               <StatCard label="โรงเรียนทั้งหมด" value={stats.schools_total.toLocaleString()} tone="blue" />
               <StatCard
@@ -237,22 +241,20 @@ function OverviewContent() {
           {/* Part 2 */}
           <section className="border-t border-gray-200 pt-10">
             <h2 className="text-xl font-extrabold text-[var(--primary-blue)] mb-1">
-              Part 2: Exam Follow-up & Progress
+              ติดตามผลการทดสอบ
             </h2>
-            <p className="text-xs text-gray-500 mb-5">ติดตามสถานะการสอบและผลการผ่านเกณฑ์</p>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mb-5">ติดตามสถานะการสอบและผลการผ่านเกณฑ์</p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-              <StatCard label="ผู้มีสิทธิ์สอบ" value={eligible.toLocaleString()} hint="Total Candidates" tone="blue" />
+              <StatCard label="ผู้มีสิทธิ์สอบ" value={eligible.toLocaleString()} tone="blue" />
               <StatCard
                 label="กำลังทำข้อสอบ / ฉบับร่าง"
                 value={inProgressCount.toLocaleString()}
-                hint="In-Progress / Draft"
                 tone="amber"
               />
               <StatCard
                 label="ส่งข้อสอบแล้ว"
                 value={finishedCount.toLocaleString()}
-                hint="Finished / Submitted"
                 tone="gray"
               />
             </div>
@@ -261,13 +263,11 @@ function OverviewContent() {
               <StatCard
                 label="สอบผ่าน"
                 value={passedCount.toLocaleString()}
-                hint={`เกณฑ์ผ่าน ≥ ${passScore} คะแนน (${siteProject?.pass_threshold ?? 60}%)`}
                 tone="green"
               />
               <StatCard
                 label="ยังไม่ผ่านเกณฑ์"
                 value={failedCount.toLocaleString()}
-                hint="ตรวจคำตอบแล้วและไม่ผ่าน"
                 tone="red"
               />
             </div>

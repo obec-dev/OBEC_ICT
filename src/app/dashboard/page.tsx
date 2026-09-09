@@ -122,7 +122,7 @@ export default function DashboardPage() {
             <span className="text-gray-400">
               {" "}
               · สรุป {schoolTotals.zones.toLocaleString()} เขต / {schoolTotals.total.toLocaleString()}{" "}
-              โรงเรียน (โหลดรายชื่อเมื่อขยายการ์ดเท่านั้น)
+              โรงเรียน
             </span>
           )}
         </p>

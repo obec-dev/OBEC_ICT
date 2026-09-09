@@ -5,20 +5,19 @@ import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
 import { getSiteProject } from "@/lib/siteSettings";
-import {
-  adminDeleteProfileRpc,
-  adminSearchProfiles,
-  adminUpdateProfileRpc,
-} from "@/lib/supabase/admin";
+import { adminDeleteProfileRpc, adminSearchProfiles } from "@/lib/supabase/admin";
 import { fetchExamProgressByProfiles } from "@/lib/supabase/data";
 import { inputClass } from "@/lib/styles";
 import type { Candidate, ExamProgress } from "@/types/ict";
 
 function examStatusLabel(exam: ExamProgress | undefined): { text: string; className: string } {
-  if (!exam) return { text: "ยังไม่เริ่มสอบ", className: "bg-gray-100 text-gray-600" };
+  if (!exam) return { text: "ยังไม่เริ่มสอบ", className: "bg-gray-100 text-gray-600 dark:bg-slate-800 dark:text-slate-300" };
   if (exam.status === "submitted") {
-    if (exam.passed === true) return { text: "ส่งแล้ว · ผ่าน", className: "bg-emerald-100 text-emerald-800" };
-    if (exam.passed === false) return { text: "ส่งแล้ว · ไม่ผ่าน", className: "bg-red-100 text-red-800" };
+    // Show pass/fail only after grading has been run
+    if (exam.graded_at) {
+      if (exam.passed === true) return { text: "ส่งแล้ว · ผ่าน", className: "bg-emerald-100 text-emerald-800" };
+      if (exam.passed === false) return { text: "ส่งแล้ว · ไม่ผ่าน", className: "bg-red-100 text-red-800" };
+    }
     return { text: "ส่งข้อสอบแล้ว", className: "bg-blue-100 text-blue-800" };
   }
   return { text: "ฉบับร่าง / กำลังทำ", className: "bg-amber-100 text-amber-800" };
@@ -39,12 +38,6 @@ function CandidatesContent() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [unlockingId, setUnlockingId] = useState<string | null>(null);
-
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editFirst, setEditFirst] = useState("");
-  const [editLast, setEditLast] = useState("");
-  const [editPhone, setEditPhone] = useState("");
-  const [editRemark, setEditRemark] = useState("");
 
   const searchLocal = (q: string): Candidate[] => {
     const needle = q.toLowerCase();
@@ -85,14 +78,13 @@ function CandidatesContent() {
     if (!adminToken) return;
     const q = query.trim();
     if (!q) {
-      setError("กรุณากรอกเลขบัตรประชาชน รหัสโรงเรียน หรือชื่อ");
+      setError("กรุณากรอกเลขบัตรประชาชนหรือรหัสโรงเรียน");
       return;
     }
     setError("");
     setMessage("");
     setLoading(true);
     setSearched(true);
-    setEditingId(null);
     try {
       let rows: Candidate[] = [];
       try {
@@ -111,66 +103,20 @@ function CandidatesContent() {
     }
   };
 
-  const startEdit = (p: Candidate) => {
-    setEditingId(p.id);
-    setEditFirst(p.first_name);
-    setEditLast(p.last_name);
-    setEditPhone(p.phone);
-    setEditRemark(p.remark ?? "");
-  };
-
-  const saveEdit = async () => {
-    if (!adminToken || !editingId) return;
-    const result = await adminUpdateProfileRpc(adminToken, {
-      profile_id: editingId,
-      first_name: editFirst,
-      last_name: editLast,
-      phone: editPhone,
-      remark: editRemark,
-    });
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    setMessage("บันทึกข้อมูลผู้สมัครแล้ว");
-    setResults((prev) =>
-      prev.map((p) =>
-        p.id === editingId
-          ? {
-              ...p,
-              first_name: editFirst,
-              last_name: editLast,
-              full_name: `${editFirst} ${editLast}`.trim(),
-              phone: editPhone,
-              remark: editRemark,
-            }
-          : p
-      )
-    );
-    setEditingId(null);
-    void refreshData();
-  };
-
   const deleteOne = async (profileId: string) => {
     if (!adminToken) return;
-    if (!confirm(`ลบผู้สมัคร ${profileId}? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
+    if (!confirm("ลบผู้สมัครรายนี้?")) return;
     const result = await adminDeleteProfileRpc(adminToken, profileId);
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    setMessage("ลบผู้สมัครแล้ว");
     setResults((prev) => prev.filter((p) => p.id !== profileId));
-    setExamMap((prev) => {
-      const next = { ...prev };
-      delete next[profileId];
-      return next;
-    });
+    setMessage("ลบผู้สมัครแล้ว");
     void refreshData();
   };
 
   const unlockExam = async (profileId: string) => {
-    if (!confirm("ปลดล็อกข้อสอบให้ทำใหม่? คำตอบเดิมจะถูกเก็บไว้ และสถานะจะกลับเป็นฉบับร่าง")) return;
     setUnlockingId(profileId);
     setError("");
     setMessage("");
@@ -205,17 +151,17 @@ function CandidatesContent() {
   return (
     <div className="max-w-6xl mx-auto px-4 py-12 animate-fade-in-up">
       <AdminNav />
-      <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">จัดการผู้สมัคร & ข้อสอบ</h1>
-      <p className="text-gray-500 mb-6">
-        ค้นหาด้วยเลขบัตรประชาชน / รหัสโรงเรียน / ชื่อ แล้วแก้ไข ลบ หรือปลดล็อกข้อสอบ (Allow Retake)
+      <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">จัดการ - การส่งข้อสอบ</h1>
+      <p className="text-gray-500 dark:text-slate-400 mb-6">
+        ค้นหาด้วยเลขบัตรประชาชนหรือรหัสโรงเรียน เพื่ออนุญาตให้แก้ไขข้อสอบที่ส่งแล้วได้
         {siteProject ? ` · โครงการ: ${siteProject.name}` : ""}
       </p>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm p-6 mb-6">
         <div className="flex flex-col sm:flex-row gap-3">
           <input
             className={inputClass}
-            placeholder="เลขบัตรประชาชน, รหัสโรงเรียน, หรือชื่อผู้สมัคร"
+            placeholder="เลขบัตรประชาชน หรือรหัสโรงเรียน"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -229,13 +175,13 @@ function CandidatesContent() {
             type="button"
             onClick={() => void runSearch()}
             disabled={loading || !query.trim()}
-            className="rounded-xl bg-[var(--primary-blue)] text-white px-6 py-3 font-bold disabled:opacity-40 shrink-0"
+            className="rounded-xl bg-[var(--primary-blue)] text-white dark:text-slate-900 px-6 py-3 font-bold disabled:opacity-40 shrink-0"
           >
             {loading ? "กำลังค้นหา..." : "ค้นหา"}
           </button>
         </div>
         <p className="text-xs text-gray-400 mt-2">
-          ปลดล็อกข้อสอบจะเปลี่ยนสถานะจาก submitted → draft โดยคงคำตอบเดิมไว้ทั้งหมด
+          ปลดล็อกข้อสอบจะเปลี่ยนสถานะไปเป็นฉบับร่าง โดยคงคำตอบเดิมไว้ทั้งหมด
         </p>
       </div>
 
@@ -243,9 +189,9 @@ function CandidatesContent() {
       {message && <p className="text-sm text-[var(--accent-green)] mb-4 font-semibold">{message}</p>}
 
       {searched && (
-        <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto shadow-sm">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-100 dark:border-slate-700 overflow-x-auto shadow-sm">
           <table className="w-full text-sm min-w-[720px]">
-            <thead className="bg-[var(--primary-blue)] text-white">
+            <thead className="bg-[var(--primary-blue)] text-white dark:text-slate-900">
               <tr>
                 <th className="text-left px-4 py-3">เลขบัตร</th>
                 <th className="text-left px-4 py-3">ชื่อ-นามสกุล</th>
@@ -259,65 +205,48 @@ function CandidatesContent() {
                 const exam = examMap[p.id] || getExamFor(p.id, projectId);
                 const status = examStatusLabel(exam);
                 const canUnlock = exam?.status === "submitted";
+                const showScore = Boolean(exam?.graded_at && exam.score != null);
 
                 return (
-                  <tr key={p.id} className="border-t border-gray-100 align-top">
+                  <tr
+                    key={p.id}
+                    className="border-t border-gray-100 dark:border-slate-800 align-top hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
+                  >
                     <td className="px-4 py-3 font-mono text-xs">{p.id}</td>
                     <td className="px-4 py-3">
-                      {editingId === p.id ? (
-                        <div className="space-y-2 min-w-[180px]">
-                          <input className={inputClass} value={editFirst} onChange={(e) => setEditFirst(e.target.value)} placeholder="ชื่อ" />
-                          <input className={inputClass} value={editLast} onChange={(e) => setEditLast(e.target.value)} placeholder="นามสกุล" />
-                          <input className={inputClass} value={editPhone} onChange={(e) => setEditPhone(e.target.value)} placeholder="โทร" />
-                          <input className={inputClass} value={editRemark} onChange={(e) => setEditRemark(e.target.value)} placeholder="หมายเหตุ" />
-                        </div>
-                      ) : (
-                        <div>
-                          <div className="font-semibold text-gray-800">{p.full_name}</div>
-                          <div className="text-xs text-gray-500">{p.phone}</div>
-                        </div>
-                      )}
+                      <div className="font-semibold text-gray-800 dark:text-gray-100">{p.full_name}</div>
+                      <div className="text-xs text-gray-500">{p.phone}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="text-gray-800">{p.school_name || "—"}</div>
+                      <div className="text-gray-800 dark:text-gray-100">{p.school_name || "—"}</div>
                       <div className="text-xs font-mono text-gray-400">{p.school_id}</div>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-block text-[11px] font-bold px-2.5 py-1 rounded-full ${status.className}`}>
                         {status.text}
                       </span>
-                      {exam?.score != null && <div className="text-xs text-gray-500 mt-1">คะแนน {exam.score}</div>}
+                      {showScore && <div className="text-xs text-gray-500 mt-1">คะแนน {exam?.score}</div>}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      {editingId === p.id ? (
-                        <div className="flex flex-col gap-2 items-start">
-                          <button type="button" className="text-[var(--accent-green)] font-bold" onClick={() => void saveEdit()}>
-                            บันทึก
+                      <div className="flex flex-row flex-wrap items-center gap-3">
+                        {canUnlock && (
+                          <button
+                            type="button"
+                            disabled={unlockingId === p.id}
+                            className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-amber-800 font-bold text-xs disabled:opacity-40"
+                            onClick={() => void unlockExam(p.id)}
+                          >
+                            {unlockingId === p.id ? "กำลังปลดล็อก..." : "อนุญาตให้สอบใหม่ (Retake)"}
                           </button>
-                          <button type="button" className="text-gray-500" onClick={() => setEditingId(null)}>
-                            ยกเลิก
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col gap-2 items-start">
-                          <button type="button" className="text-[var(--primary-blue)] font-bold" onClick={() => startEdit(p)}>
-                            แก้ไข
-                          </button>
-                          {canUnlock && (
-                            <button
-                              type="button"
-                              disabled={unlockingId === p.id}
-                              className="text-amber-700 font-bold disabled:opacity-40"
-                              onClick={() => void unlockExam(p.id)}
-                            >
-                              {unlockingId === p.id ? "กำลังปลดล็อก..." : "ปลดล็อกข้อสอบ (Retake)"}
-                            </button>
-                          )}
-                          <button type="button" className="text-[var(--accent-red)] font-bold" onClick={() => void deleteOne(p.id)}>
-                            ลบ
-                          </button>
-                        </div>
-                      )}
+                        )}
+                        <button
+                          type="button"
+                          className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[var(--accent-red)] font-bold text-xs"
+                          onClick={() => void deleteOne(p.id)}
+                        >
+                          ลบ
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

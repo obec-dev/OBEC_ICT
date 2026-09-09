@@ -59,19 +59,19 @@ export default function ConsentPage() {
           <section className="rounded-2xl bg-gray-50 p-5 text-sm text-gray-600 leading-relaxed max-h-56 overflow-auto">
             <h2 className="font-bold text-[var(--primary-blue)] mb-2">ความยินยอมตาม PDPA</h2>
             <p>
-              ข้าพเจ้ายินยอมให้เก็บรวบรวม ใช้ และประมวลผลข้อมูลส่วนบุคคล ได้แก่ ชื่อ-นามสกุล อีเมล เบอร์โทรศัพท์
-              และรหัสโรงเรียน เพื่อวัตถุประสงค์ในการลงทะเบียน คัดเลือกตัวแทน ICT Talent และการติดต่อประสานงาน
-              ข้อมูลจะถูกเก็บในระบบสาธิตนี้บนเครื่องของผู้ใช้เท่านั้นในระยะพัฒนานี้
+            ข้าพเจ้ายินยอมให้ [สำนักงานคณะกรรมการการศึกษาขั้นพื้นฐาน / ชื่อหน่วยงาน] เก็บรวบรวม ใช้ และประมวลผลข้อมูลส่วนบุคคล ได้แก่ ชื่อ-นามสกุล, หมายเลขบัตรประชาชน, อีเมล, เบอร์โทรศัพท์, รหัสโรงเรียน และผลการทดสอบ 
+            เพื่อวัตถุประสงค์ในการลงทะเบียน ดำเนินการคัดเลือกตัวแทน ICT Talent และการติดต่อประสานงานที่เกี่ยวข้อง
+            ข้อมูลของท่านจะถูกจัดเก็บอย่างปลอดภัยเป็นระยะเวลา 1 ปีนับจากสิ้นสุดโครงการ ทั้งนี้ ท่านมีสิทธิ์ในการถอนความยินยอม ขอเข้าถึง แก้ไข หรือขอให้ลบข้อมูลส่วนบุคคลตามสิทธิ์ของเจ้าของข้อมูลได้ตลอดเวลา
             </p>
           </section>
 
           <label className="flex items-start gap-3 cursor-pointer">
             <input type="checkbox" className="mt-1" checked={terms} onChange={(e) => setTerms(e.target.checked)} />
-            <span className="text-gray-700">ข้าพเจ้าได้อ่านและยอมรับข้อกำหนดและเงื่อนไข</span>
+            <span className="text-gray-700">ข้าพเจ้าได้อ่านและยอมรับข้อกำหนดและเงื่อนไขการใช้งาน (จำเป็น)</span>
           </label>
           <label className="flex items-start gap-3 cursor-pointer">
             <input type="checkbox" className="mt-1" checked={pdpa} onChange={(e) => setPdpa(e.target.checked)} />
-            <span className="text-gray-700">ข้าพเจ้ายินยอมให้ประมวลผลข้อมูลส่วนบุคคลตาม PDPA</span>
+            <span className="text-gray-700">ข้าพเจ้ายินยอมให้ประมวลผลข้อมูลส่วนบุคคลตาม PDPA (จำเป็น)</span>
           </label>
 
           <button

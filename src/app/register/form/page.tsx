@@ -354,7 +354,7 @@ export default function RegisterFormPage() {
           <div className="bg-[var(--primary-blue)] px-8 py-6 text-white">
             <h1 className="text-2xl font-bold">แบบฟอร์มลงทะเบียน</h1>
             <p className="text-blue-100 mt-1">
-              ตรวจสอบรหัสโรงเรียน จากนั้นกรอกข้อมูลผู้สมัคร (เพิ่มได้หลายคนต่อโรงเรียน)
+              ตรวจสอบรหัสโรงเรียนก่อนเริ่มกรอกข้อมูลผู้สมัคร
             </p>
           </div>
 
@@ -362,7 +362,6 @@ export default function RegisterFormPage() {
             <div className="p-5 rounded-2xl bg-blue-50/70 border border-blue-100">
               <p className="text-sm font-bold text-[var(--primary-blue)] mb-1">📚 โครงการที่เปิดรับสมัคร</p>
               <p className="text-base font-extrabold text-gray-800">{siteProject.name}</p>
-              <p className="text-xs font-mono text-gray-500 mt-1">Project ID: {siteProject.id}</p>
             </div>
 
             <div className="flex items-center gap-2 text-sm font-semibold text-[var(--primary-blue)]">
@@ -449,7 +448,7 @@ export default function RegisterFormPage() {
               <span className="inline-flex size-6 items-center justify-center rounded-full bg-[var(--primary-blue)] text-white text-xs">
                 2
               </span>
-              ข้อมูลผู้สมัคร ({persons.length} คน)
+              ข้อมูลผู้สมัคร (ทั้งหมด {persons.length} คน)
             </div>
 
             {persons.map((person, index) => {

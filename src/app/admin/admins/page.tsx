@@ -115,7 +115,7 @@ function AdminsContent() {
           <input className={inputClass} placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} />
           <input className={inputClass} placeholder="ชื่อ-นามสกุล" value={fullName} onChange={(e) => setFullName(e.target.value)} />
           <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as AdminRole)}>
-            <option value="admin">admin (จัดการลงทะเบียน)</option>
+            <option value="admin">admin (จัดการ - การลงทะเบียน)</option>
             <option value="super_admin">super_admin (ทั้งหมด)</option>
           </select>
         </div>
@@ -144,7 +144,6 @@ function AdminsContent() {
             <tr>
               <th className="text-left px-4 py-3">Username</th>
               <th className="text-left px-4 py-3">ชื่อ</th>
-              <th className="text-left px-4 py-3">Role</th>
               <th className="text-left px-4 py-3">สถานะ</th>
               <th className="text-left px-4 py-3">จัดการ</th>
             </tr>
@@ -158,16 +157,20 @@ function AdminsContent() {
                     <span className="ml-2 text-xs text-gray-400">(คุณ)</span>
                   )}
                 </td>
-                <td className="px-4 py-3">{row.full_name}</td>
                 <td className="px-4 py-3">
-                  <select
-                    className="rounded-lg border border-gray-200 px-2 py-1"
-                    value={row.role}
-                    onChange={(e) => void changeRole(row, e.target.value as AdminRole)}
-                  >
-                    <option value="admin">admin</option>
-                    <option value="super_admin">super_admin</option>
-                  </select>
+                  <div className="font-semibold text-gray-800">{row.full_name}</div>
+                  <div className="mt-0.5 flex items-center gap-2">
+                    <span className="text-xs text-gray-500">{row.role}</span>
+                    <select
+                      className="rounded-md border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600 bg-gray-50"
+                      value={row.role}
+                      onChange={(e) => void changeRole(row, e.target.value as AdminRole)}
+                      title="เปลี่ยนบทบาท"
+                    >
+                      <option value="admin">admin</option>
+                      <option value="super_admin">super_admin</option>
+                    </select>
+                  </div>
                 </td>
                 <td className="px-4 py-3">
                   {row.is_active === false ? (

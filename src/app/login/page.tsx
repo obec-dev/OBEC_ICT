@@ -39,13 +39,13 @@ export default function LoginPage() {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-              เลขบัตรประชาชน / ผู้ดูแล
+              เลขบัตรประชาชน
             </label>
             <input className={inputClass} value={profileId} onChange={(e) => setProfileId(e.target.value)} required />
           </div>
           <div>
             <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-              เบอร์โทรศัพท์ / รหัสผ่านผู้ดูแล
+              เบอร์โทรศัพท์
             </label>
             <div className="relative">
               <input

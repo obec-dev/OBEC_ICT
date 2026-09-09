@@ -35,8 +35,8 @@ export function ToggleSwitch({
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-blue)] focus-visible:ring-offset-2 ${
-          checked ? "bg-[var(--primary-blue)]" : "bg-gray-300"
+        className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-solid)] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[var(--background)] ${
+          checked ? "bg-[var(--primary-solid)]" : "bg-gray-300 dark:bg-slate-600"
         } ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
       >
         <span

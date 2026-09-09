@@ -8,6 +8,27 @@ function asObj(data: unknown): Record<string, unknown> {
   return {};
 }
 
+/** Map RPC errors like `unauthorized` / `forbidden` to Thai UX copy. */
+export function normalizeAdminError(message: string): string {
+  const m = message.toLowerCase();
+  if (m.includes("unauthorized")) {
+    return "เซสชันหมดอายุหรือไม่ถูกต้อง กรุณาเข้าสู่ระบบผู้ดูแลใหม่";
+  }
+  if (m.includes("forbidden")) {
+    return "ไม่มีสิทธิ์ดำเนินการนี้";
+  }
+  return message;
+}
+
+export function isAdminUnauthorized(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error ?? "");
+  return /unauthorized/i.test(msg);
+}
+
+function adminRpcFail(error: { message: string }): Error {
+  return new Error(normalizeAdminError(error.message));
+}
+
 export function generateTempPassword(length = 12): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$";
   const bytes = crypto.getRandomValues(new Uint8Array(length));
@@ -23,7 +44,7 @@ export async function adminLogin(
     p_username: username.trim(),
     p_password: password,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: normalizeAdminError(error.message) };
 
   const row = asObj(data);
   if (!row.ok) return { ok: false, error: String(row.error ?? "เข้าสู่ระบบไม่สำเร็จ") };
@@ -54,7 +75,7 @@ export async function adminChangePassword(token: string, oldPassword: string, ne
     p_old_password: oldPassword,
     p_new_password: newPassword,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "เปลี่ยนรหัสผ่านไม่สำเร็จ") };
   return { ok: true as const };
@@ -63,7 +84,7 @@ export async function adminChangePassword(token: string, oldPassword: string, ne
 export async function adminList(token: string): Promise<AdminUser[]> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_list", { p_token: token });
-  if (error) throw new Error(error.message);
+  if (error) throw adminRpcFail(error);
   if (!Array.isArray(data)) return [];
   return data.map((item) => {
     const a = asObj(item);
@@ -91,7 +112,7 @@ export async function adminCreate(
     p_role: input.role,
     p_temp_password: input.temp_password,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "สร้างผู้ดูแลไม่สำเร็จ") };
   return {
@@ -108,7 +129,7 @@ export async function adminResetPassword(token: string, targetAdminId: string, t
     p_target_admin_id: targetAdminId,
     p_temp_password: tempPassword,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "รีเซ็ตรหัสผ่านไม่สำเร็จ") };
   return { ok: true as const, temp_password: String(row.temp_password) };
@@ -121,7 +142,7 @@ export async function adminSetActive(token: string, targetAdminId: string, isAct
     p_target_admin_id: targetAdminId,
     p_is_active: isActive,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "อัปเดตสถานะไม่สำเร็จ") };
   return { ok: true as const };
@@ -134,7 +155,7 @@ export async function adminSetRole(token: string, targetAdminId: string, role: A
     p_target_admin_id: targetAdminId,
     p_role: role,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "เปลี่ยนบทบาทไม่สำเร็จ") };
   return { ok: true as const };
@@ -143,7 +164,7 @@ export async function adminSetRole(token: string, targetAdminId: string, role: A
 export async function adminGetSettings(token: string): Promise<Record<string, unknown>> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_get_settings", { p_token: token });
-  if (error) throw new Error(error.message);
+  if (error) throw adminRpcFail(error);
   return asObj(data);
 }
 
@@ -153,7 +174,7 @@ export async function adminSaveSettings(token: string, settings: Record<string, 
     p_token: token,
     p_settings: settings,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกตั้งค่าไม่สำเร็จ") };
   return { ok: true as const };
@@ -165,7 +186,7 @@ export async function adminListProfilesBySchool(token: string, schoolId: string)
     p_token: token,
     p_school_id: schoolId,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw adminRpcFail(error);
   if (!Array.isArray(data)) return [];
   return data.map((item) => {
     const p = asObj(item);
@@ -203,7 +224,7 @@ export async function adminUpdateProfileRpc(
     p_phone: input.phone,
     p_remark: input.remark ?? "",
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "อัปเดตไม่สำเร็จ") };
   return { ok: true as const };
@@ -215,7 +236,7 @@ export async function adminDeleteProfileRpc(token: string, profileId: string) {
     p_token: token,
     p_profile_id: profileId,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "ลบไม่สำเร็จ") };
   return { ok: true as const };
@@ -227,7 +248,7 @@ export async function adminDeleteSchoolProfilesRpc(token: string, schoolId: stri
     p_token: token,
     p_school_id: schoolId,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "ลบไม่สำเร็จ") };
   return { ok: true as const, deleted_count: Number(row.deleted_count) || 0 };
@@ -240,7 +261,7 @@ export async function adminSearchProfiles(token: string, query: string, limit = 
     p_query: query.trim(),
     p_limit: limit,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw adminRpcFail(error);
   if (!Array.isArray(data)) return [];
   return data.map((item) => {
     const p = asObj(item);
@@ -271,7 +292,7 @@ export async function adminUnlockExamRpc(
     p_profile_id: profileId,
     p_project_id: projectId ?? null,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false, error: String(row.error ?? "ปลดล็อกข้อสอบไม่สำเร็จ") };
   return { ok: true, updated: Number(row.updated) || 0 };
@@ -318,7 +339,7 @@ export type AdminOverviewStats = {
 export async function adminOverviewStats(token: string): Promise<AdminOverviewStats> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_overview_stats", { p_token: token });
-  if (error) throw new Error(error.message);
+  if (error) throw adminRpcFail(error);
   const row = asObj(data);
   return {
     schools_total: Number(row.schools_total) || 0,
@@ -341,7 +362,7 @@ export async function adminListAuditLogs(token: string, limit = 100, offset = 0)
     p_limit: limit,
     p_offset: offset,
   });
-  if (error) throw new Error(error.message);
+  if (error) throw adminRpcFail(error);
   if (!Array.isArray(data)) return [];
   return data.map((item) => {
     const r = asObj(item);
@@ -364,7 +385,7 @@ export async function adminListAuditLogs(token: string, limit = 100, offset = 0)
 export async function adminAuditStats(token: string) {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_audit_stats", { p_token: token });
-  if (error) throw new Error(error.message);
+  if (error) throw adminRpcFail(error);
   const row = asObj(data);
   return {
     total_logs: Number(row.total_logs) || 0,
@@ -377,7 +398,7 @@ export async function adminAuditStats(token: string) {
 export async function adminExportAuditLogs(token: string): Promise<AuditLogRow[]> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_export_audit_logs", { p_token: token });
-  if (error) throw new Error(error.message);
+  if (error) throw adminRpcFail(error);
   if (!Array.isArray(data)) return [];
   return data.map((item) => {
     const r = asObj(item);
@@ -403,7 +424,7 @@ export async function adminPurgeAuditLogs(token: string, exportFilename: string,
     p_export_filename: exportFilename,
     p_confirm: confirm,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "ล้าง log ไม่สำเร็จ") };
   return {
@@ -417,7 +438,7 @@ export async function adminPurgeAuditLogs(token: string, exportFilename: string,
 export async function adminListPurgeHistory(token: string): Promise<AuditPurgeHistoryRow[]> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_list_purge_history", { p_token: token });
-  if (error) throw new Error(error.message);
+  if (error) throw adminRpcFail(error);
   if (!Array.isArray(data)) return [];
   return data.map((item) => {
     const r = asObj(item);

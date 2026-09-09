@@ -8,7 +8,6 @@ import {
   adminDeleteProfileRpc,
   adminDeleteSchoolProfilesRpc,
   adminListProfilesBySchool,
-  adminUpdateProfileRpc,
 } from "@/lib/supabase/admin";
 import { searchSchoolsByName } from "@/lib/supabase/data";
 import { disabledInputClass, inputClass } from "@/lib/styles";
@@ -25,11 +24,6 @@ function RegistrationsContent() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editFirst, setEditFirst] = useState("");
-  const [editLast, setEditLast] = useState("");
-  const [editPhone, setEditPhone] = useState("");
-  const [editRemark, setEditRemark] = useState("");
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -125,34 +119,6 @@ function RegistrationsContent() {
     }
   };
 
-  const startEdit = (p: Candidate) => {
-    setEditingId(p.id);
-    setEditFirst(p.first_name);
-    setEditLast(p.last_name);
-    setEditPhone(p.phone);
-    setEditRemark(p.remark ?? "");
-  };
-
-  const saveEdit = async () => {
-    if (!adminToken || !editingId || !school) return;
-    const result = await adminUpdateProfileRpc(adminToken, {
-      profile_id: editingId,
-      first_name: editFirst,
-      last_name: editLast,
-      phone: editPhone,
-      remark: editRemark,
-    });
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    setMessage("บันทึกผู้สมัครแล้ว");
-    setEditingId(null);
-    const rows = await adminListProfilesBySchool(adminToken, school.school_id);
-    setProfiles(rows);
-    void refreshData();
-  };
-
   const deleteOne = async (profileId: string) => {
     if (!adminToken || !school) return;
     if (!confirm(`ลบผู้สมัคร ${profileId}?`)) return;
@@ -183,10 +149,8 @@ function RegistrationsContent() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-12 animate-fade-in-up">
       <AdminNav />
-      <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">จัดการลงทะเบียน</h1>
-      <p className="text-gray-500 mb-6">
-        ค้นด้วยชื่อโรงเรียนหรือรหัสโรงเรียน (มี auto-suggest) แล้วแก้ไข/ลบผู้สมัคร
-      </p>
+      <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">จัดการ - การลงทะเบียน</h1>
+      <p className="text-gray-500 dark:text-slate-400 mb-6">ค้นด้วยชื่อโรงเรียนหรือรหัสโรงเรียน</p>
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6">
         <div ref={wrapRef} className="relative flex flex-col sm:flex-row gap-3">
@@ -281,53 +245,18 @@ function RegistrationsContent() {
               </thead>
               <tbody>
                 {profiles.map((p) => (
-                  <tr key={p.id} className="border-t border-gray-100">
+                  <tr key={p.id} className="border-t border-gray-100 dark:border-slate-800">
                     <td className="px-4 py-3 font-mono text-xs">{p.id}</td>
-                    <td className="px-4 py-3">
-                      {editingId === p.id ? (
-                        <div className="flex gap-2">
-                          <input className={inputClass} value={editFirst} onChange={(e) => setEditFirst(e.target.value)} />
-                          <input className={inputClass} value={editLast} onChange={(e) => setEditLast(e.target.value)} />
-                        </div>
-                      ) : (
-                        p.full_name
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {editingId === p.id ? (
-                        <div className="space-y-2">
-                          <input className={inputClass} value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
-                          <input
-                            className={inputClass}
-                            placeholder="หมายเหตุ"
-                            value={editRemark}
-                            onChange={(e) => setEditRemark(e.target.value)}
-                          />
-                        </div>
-                      ) : (
-                        p.phone
-                      )}
-                    </td>
+                    <td className="px-4 py-3">{p.full_name}</td>
+                    <td className="px-4 py-3">{p.phone}</td>
                     <td className="px-4 py-3 whitespace-nowrap">
-                      {editingId === p.id ? (
-                        <>
-                          <button type="button" className="text-[var(--accent-green)] font-bold mr-3" onClick={() => void saveEdit()}>
-                            บันทึก
-                          </button>
-                          <button type="button" className="text-gray-500" onClick={() => setEditingId(null)}>
-                            ยกเลิก
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button type="button" className="text-[var(--primary-blue)] font-bold mr-3" onClick={() => startEdit(p)}>
-                            แก้ไข
-                          </button>
-                          <button type="button" className="text-[var(--accent-red)] font-bold" onClick={() => void deleteOne(p.id)}>
-                            ลบ
-                          </button>
-                        </>
-                      )}
+                      <button
+                        type="button"
+                        className="text-[var(--accent-red)] font-bold"
+                        onClick={() => void deleteOne(p.id)}
+                      >
+                        ลบ
+                      </button>
                     </td>
                   </tr>
                 ))}

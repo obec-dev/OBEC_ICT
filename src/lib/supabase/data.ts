@@ -46,9 +46,13 @@ function districtName(row: SchoolRow): string {
 }
 
 export function mapSchoolRow(row: SchoolRow): School {
-  const hasProfile = Array.isArray(row.profiles)
-    ? row.profiles.length > 0
-    : Boolean(row.profiles);
+  const profileList = Array.isArray(row.profiles)
+    ? row.profiles
+    : row.profiles
+      ? [row.profiles]
+      : [];
+  const registered_count = profileList.length;
+  const hasProfile = registered_count > 0;
 
   return {
     school_id: row.school_id,
@@ -57,6 +61,7 @@ export function mapSchoolRow(row: SchoolRow): School {
     province: row.province,
     is_registered: Boolean(row.is_registered) || hasProfile,
     district_id: row.district_id,
+    registered_count,
   };
 }
 
@@ -360,20 +365,50 @@ export async function insertProfile(input: RegisterProfileInput): Promise<Candid
 
 export async function updateProfile(
   profileId: string,
-  patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>
+  patch: Partial<
+    Pick<
+      Candidate,
+      | "first_name"
+      | "last_name"
+      | "phone"
+      | "remark"
+      | "title_key"
+      | "title_en"
+      | "title_th"
+      | "title_other_en"
+      | "title_other_th"
+      | "eng_first_name"
+      | "eng_last_name"
+      | "position"
+      | "duty"
+      | "line_id"
+      | "email"
+    >
+  >
 ): Promise<void> {
   const supabase = createClient();
-  const payload: {
-    first_name?: string;
-    last_name?: string;
-    phone?: string;
-    remark?: string | null;
-    updated_at: string;
-  } = { updated_at: new Date().toISOString() };
+  const payload: Record<string, string | null> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  const trimOrNull = (v: string | undefined) =>
+    v === undefined ? undefined : v.trim() || null;
+
   if (patch.first_name !== undefined) payload.first_name = patch.first_name.trim();
   if (patch.last_name !== undefined) payload.last_name = patch.last_name.trim();
   if (patch.phone !== undefined) payload.phone = patch.phone.trim();
   if (patch.remark !== undefined) payload.remark = patch.remark.trim() || null;
+  if (patch.title_key !== undefined) payload.title_key = trimOrNull(patch.title_key) ?? null;
+  if (patch.title_en !== undefined) payload.title_en = trimOrNull(patch.title_en);
+  if (patch.title_th !== undefined) payload.title_th = trimOrNull(patch.title_th);
+  if (patch.title_other_en !== undefined) payload.title_other_en = trimOrNull(patch.title_other_en);
+  if (patch.title_other_th !== undefined) payload.title_other_th = trimOrNull(patch.title_other_th);
+  if (patch.eng_first_name !== undefined) payload.eng_first_name = trimOrNull(patch.eng_first_name);
+  if (patch.eng_last_name !== undefined) payload.eng_last_name = trimOrNull(patch.eng_last_name);
+  if (patch.position !== undefined) payload.position = trimOrNull(patch.position);
+  if (patch.duty !== undefined) payload.duty = trimOrNull(patch.duty);
+  if (patch.line_id !== undefined) payload.line_id = trimOrNull(patch.line_id);
+  if (patch.email !== undefined) payload.email = trimOrNull(patch.email);
 
   const { error } = await supabase.from("profiles").update(payload).eq("profile_id", profileId);
   if (error) throw new Error(error.message);

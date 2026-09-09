@@ -11,26 +11,26 @@ function AdminHome() {
   const cards = [
     {
       href: "/admin/overview",
-      title: "ภาพรวม",
-      desc: "สถานะลงทะเบียนทั้งระบบ และช่องสำหรับเรียน/สอบในอนาคต",
-      show: true,
-    },
-    {
-      href: "/admin/registrations",
-      title: "จัดการลงทะเบียน",
-      desc: "ค้นหาชื่อ/รหัสโรงเรียน แก้ไขหรือลบรายบุคคล/ทั้งโรงเรียน",
-      show: true,
-    },
-    {
-      href: "/admin/candidates",
-      title: "ผู้สมัคร & ปลดล็อกสอบ",
-      desc: "ค้นหาด้วยเลขบัตร/รหัสโรงเรียน แก้ไข ลบ และปลดล็อกข้อสอบ (Allow Retake)",
+      title: "ภาพรวมผู้ดูแลระบบ",
+      desc: "ติดตามการลงทะเบียนและผลการทดสอบ",
       show: true,
     },
     {
       href: "/admin/projects",
-      title: "จัดการวิชา & ข้อสอบ (Exam Builder)",
-      desc: "จัดการ Project ID, คลิปวิดีโอ (สวิตช์ Mandatory), และเครื่องมือสร้างข้อสอบ (MCQ & อัตนัย)",
+      title: "จัดการ - โครงการ",
+      desc: "บริหารจัดการโครงการ, กำหนดการ, คลิปวิดีโอ, ข้อสอบ และ คำตอบ",
+      show: true,
+    },
+    {
+      href: "/admin/registrations",
+      title: "จัดการ - การลงทะเบียน",
+      desc: "ค้นด้วยชื่อโรงเรียนหรือรหัสโรงเรียน",
+      show: true,
+    },
+    {
+      href: "/admin/candidates",
+      title: "จัดการ - การส่งข้อสอบ",
+      desc: "ค้นหาด้วยเลขบัตรประชาชนหรือรหัสโรงเรียน เพื่ออนุญาตให้แก้ไขข้อสอบที่ส่งแล้วได้",
       show: true,
     },
     {
@@ -57,8 +57,11 @@ function AdminHome() {
     <div className="max-w-5xl mx-auto px-4 py-12 animate-fade-in-up">
       <AdminNav />
       <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">ศูนย์ผู้ดูแลระบบ</h1>
-      <p className="text-gray-500 mb-8">
-        สวัสดี {adminUser?.full_name} ({adminUser?.role})
+      <p className="text-gray-500 dark:text-slate-400 mb-8">
+        สวัสดี {adminUser?.full_name}
+        {adminUser?.role ? (
+          <span className="block text-sm text-gray-400 dark:text-slate-500 font-medium mt-0.5">{adminUser.role}</span>
+        ) : null}
       </p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {cards
@@ -67,10 +70,10 @@ function AdminHome() {
             <Link
               key={c.href}
               href={c.href}
-              className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+              className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
             >
               <h2 className="text-xl font-bold text-[var(--primary-blue)] mb-2">{c.title}</h2>
-              <p className="text-sm text-gray-500">{c.desc}</p>
+              <p className="text-sm text-gray-500 dark:text-slate-400">{c.desc}</p>
             </Link>
           ))}
       </div>

@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { LearningProject } from "@/types/ict";
+import type { LearningProject, PassThresholdMode } from "@/types/ict";
 
 export type SitePeriodSettings = {
   site_name: string;
@@ -131,14 +131,62 @@ export function getSiteProject(projects: LearningProject[]): LearningProject | u
 }
 
 /**
- * Resolve absolute pass score from percentage threshold.
- * Legacy absolute thresholds (≤10) are treated as raw points.
+ * Resolve pass threshold mode.
+ * Legacy absolute thresholds (≤10 without an explicit mode) map to "score".
  */
-export function getPassScoreAbsolute(passThreshold: number | undefined, maxScore: number): number {
+export function resolvePassThresholdMode(
+  project?: Pick<LearningProject, "pass_threshold_mode" | "pass_threshold"> | null
+): PassThresholdMode {
+  if (project?.pass_threshold_mode === "score" || project?.pass_threshold_mode === "percent") {
+    return project.pass_threshold_mode;
+  }
+  const thr = project?.pass_threshold;
+  if (typeof thr === "number" && thr > 0 && thr <= 10) return "score";
+  return "percent";
+}
+
+export function resolvePassThresholdValue(
+  project?: Pick<LearningProject, "pass_threshold_value" | "pass_threshold"> | null
+): number {
+  if (typeof project?.pass_threshold_value === "number" && !Number.isNaN(project.pass_threshold_value)) {
+    return project.pass_threshold_value;
+  }
+  return project?.pass_threshold ?? 60;
+}
+
+/** Absolute minimum score required to pass (for display / comparisons in score units). */
+export function getPassScoreAbsolute(
+  passThreshold: number | undefined,
+  maxScore: number,
+  mode?: PassThresholdMode
+): number {
   const thr = passThreshold ?? 60;
   const max = Math.max(1, maxScore || 1);
-  if (thr <= 10) return thr;
+  const resolvedMode = mode ?? (thr <= 10 ? "score" : "percent");
+  if (resolvedMode === "score") return Math.max(0, thr);
   return Math.ceil((max * Math.min(100, Math.max(0, thr))) / 100);
+}
+
+export function isExamPassed(
+  earnedScore: number,
+  maxScore: number,
+  project?: Pick<LearningProject, "pass_threshold_mode" | "pass_threshold_value" | "pass_threshold"> | null
+): boolean {
+  const mode = resolvePassThresholdMode(project);
+  const value = resolvePassThresholdValue(project);
+  const max = Math.max(1, maxScore || 1);
+  if (mode === "percent") {
+    return (earnedScore / max) * 100 >= value;
+  }
+  return earnedScore >= value;
+}
+
+export function formatPassCriteriaLabel(
+  project?: Pick<LearningProject, "pass_threshold_mode" | "pass_threshold_value" | "pass_threshold"> | null
+): string {
+  const mode = resolvePassThresholdMode(project);
+  const value = resolvePassThresholdValue(project);
+  return mode === "score" ? `≥ ${value} คะแนน` : `${value}%`;
 }
 
 /**

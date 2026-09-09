@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, type CSSProperties } from "react";
+import { useIctStore } from "@/contexts/IctStore";
 import {
   getProjectActivityBadges,
   getProjectExamStatus,
@@ -39,14 +40,22 @@ export function ProjectCoverFlow({
   projects: LearningProject[];
   hasSession?: boolean;
 }) {
+  const { session, getExamFor } = useIctStore();
   const project = useMemo(() => getSiteProject(projects), [projects]);
   if (!project || project.is_active === false) return null;
 
   const badges = getProjectActivityBadges(project);
+  const candidate = session?.kind === "candidate" ? session.candidate : null;
+  const exam = candidate ? getExamFor(candidate.id, project.id) : undefined;
+  const showPassBadge =
+    Boolean(hasSession) &&
+    project.enable_results_visibility === true &&
+    exam?.passed === true &&
+    Boolean(exam.graded_at);
 
   return (
     <section
-      className="relative z-20 -mt-10 mb-6 px-4 animate-fade-in-up"
+      className="relative z-20 mt-8 md:mt-14 mb-10 px-4 animate-fade-in-up"
       style={{ animationDelay: "0.15s", animationFillMode: "both" }}
     >
       <div className="max-w-4xl mx-auto">
@@ -56,6 +65,11 @@ export function ProjectCoverFlow({
         >
           <div className="absolute inset-0 p-7 md:p-10 flex flex-col justify-between">
             <div className="flex flex-wrap gap-2">
+              {showPassBadge && (
+                <span className="text-[11px] md:text-xs font-extrabold bg-emerald-500 text-white border border-emerald-300/60 rounded-full px-3 py-1.5 shadow-lg">
+                  ✓ ท่านผ่านการทดสอบโครงการนี้แล้ว
+                </span>
+              )}
               {badges.slice(0, 3).map((badge) => (
                 <span
                   key={badge}
@@ -75,7 +89,7 @@ export function ProjectCoverFlow({
                 className="inline-flex mt-5 rounded-full bg-white text-[var(--primary-blue)] px-6 py-2.5 text-sm font-bold hover:bg-blue-50 transition-colors"
               >
                 {hasSession
-                  ? "เข้าเรียน"
+                  ? "เข้าสู่โครงการ"
                   : getProjectRegistrationStatus(project).open
                     ? "ลงทะเบียน"
                     : "เข้าสู่ระบบ"}

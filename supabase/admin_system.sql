@@ -112,6 +112,12 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'unauthorized';
   END IF;
+
+  -- Slide expiry on successful use (keeps active admins signed in)
+  UPDATE public.admin_sessions
+  SET expires_at = now() + interval '12 hours'
+  WHERE token = p_token;
+
   RETURN a;
 END;
 $$;

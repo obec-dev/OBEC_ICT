@@ -5,6 +5,8 @@ export type School = {
   province: string;
   is_registered: boolean;
   district_id?: string;
+  /** Number of registered candidates (profiles) at this school */
+  registered_count?: number;
 };
 
 /** Aggregated per-district stats for dashboard (no full school list) */
@@ -89,6 +91,8 @@ export type ExamQuestion = {
 /** Sanitized version for candidates during exams to prevent anti-cheating inspection */
 export type PublicExamQuestion = Omit<ExamQuestion, "correct_answer" | "model_answer">;
 
+export type PassThresholdMode = "percent" | "score";
+
 export type LearningProject = {
   id: string; // project_id e.g. "ict-talent-2026"
   name: string;
@@ -103,7 +107,16 @@ export type LearningProject = {
   exam_start?: string | null;
   exam_end?: string | null;
   exam_enabled?: boolean;
-  /** Pass threshold as percentage of max score (0–100). Legacy absolute values ≤10 are still supported when grading. */
+  /** When true, candidates can see pass/fail results and celebration. */
+  enable_results_visibility?: boolean;
+  /** How pass_threshold_value is interpreted. */
+  pass_threshold_mode?: PassThresholdMode;
+  /** Percentage (0–100) or absolute score, depending on mode. */
+  pass_threshold_value?: number;
+  /**
+   * @deprecated Prefer pass_threshold_value + pass_threshold_mode.
+   * Kept in sync for older rows / clients.
+   */
   pass_threshold?: number;
   max_score?: number;
   created_at?: string;
