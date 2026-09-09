@@ -391,14 +391,13 @@ export async function updateProfile(
     updated_at: new Date().toISOString(),
   };
 
-  const trimOrNull = (v: string | undefined) =>
-    v === undefined ? undefined : v.trim() || null;
+  const trimOrNull = (v: string): string | null => v.trim() || null;
 
   if (patch.first_name !== undefined) payload.first_name = patch.first_name.trim();
   if (patch.last_name !== undefined) payload.last_name = patch.last_name.trim();
   if (patch.phone !== undefined) payload.phone = patch.phone.trim();
   if (patch.remark !== undefined) payload.remark = patch.remark.trim() || null;
-  if (patch.title_key !== undefined) payload.title_key = trimOrNull(patch.title_key) ?? null;
+  if (patch.title_key !== undefined) payload.title_key = trimOrNull(patch.title_key);
   if (patch.title_en !== undefined) payload.title_en = trimOrNull(patch.title_en);
   if (patch.title_th !== undefined) payload.title_th = trimOrNull(patch.title_th);
   if (patch.title_other_en !== undefined) payload.title_other_en = trimOrNull(patch.title_other_en);
