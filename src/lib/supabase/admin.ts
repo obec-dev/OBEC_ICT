@@ -200,6 +200,7 @@ export async function adminListProfilesBySchool(token: string, schoolId: string)
       full_name: `${first} ${last}`.trim(),
       phone: String(p.phone ?? ""),
       remark: p.remark ? String(p.remark) : undefined,
+      is_school_admin: Boolean(p.is_school_admin),
       created_at: p.created_at ? String(p.created_at) : new Date().toISOString(),
     };
   });
@@ -254,6 +255,40 @@ export async function adminDeleteSchoolProfilesRpc(token: string, schoolId: stri
   return { ok: true as const, deleted_count: Number(row.deleted_count) || 0 };
 }
 
+export async function adminDeleteExamProgressRpc(
+  token: string,
+  profileId: string,
+  projectId?: string
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_delete_exam_progress", {
+    p_token: token,
+    p_profile_id: profileId,
+    p_project_id: projectId ?? null,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "ลบข้อมูลข้อสอบไม่สำเร็จ") };
+  return { ok: true as const, deleted: Number(row.deleted) || 0 };
+}
+
+export async function adminSetSchoolAdminRpc(
+  token: string,
+  profileId: string,
+  isSchoolAdmin: boolean
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_set_school_admin", {
+    p_token: token,
+    p_profile_id: profileId,
+    p_is_school_admin: isSchoolAdmin,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "เปลี่ยนบทบาทไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
 export async function adminSearchProfiles(token: string, query: string, limit = 50): Promise<Candidate[]> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_search_profiles", {
@@ -276,6 +311,7 @@ export async function adminSearchProfiles(token: string, query: string, limit = 
       full_name: `${first} ${last}`.trim(),
       phone: String(p.phone ?? ""),
       remark: p.remark ? String(p.remark) : undefined,
+      is_school_admin: Boolean(p.is_school_admin),
       created_at: p.created_at ? String(p.created_at) : new Date().toISOString(),
     };
   });

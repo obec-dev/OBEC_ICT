@@ -52,7 +52,7 @@ export default function Home() {
   return (
     <div className="min-h-screen overflow-hidden">
       {/* 1. Hero */}
-      <section className="relative bg-[var(--primary-blue)] pt-24 pb-40 px-4">
+      <section className="relative bg-[var(--primary-blue)] dark:bg-black pt-24 pb-40 px-4">
         <div className="absolute top-0 right-0 w-full h-full opacity-10 pointer-events-none flex justify-end animate-float">
           <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="w-[800px] h-[800px] -mr-40 -mt-20 transform rotate-12">
             <path

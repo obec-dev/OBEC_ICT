@@ -9,7 +9,6 @@ import { UnsavedLeaveGuard } from "@/app/components/UnsavedLeaveGuard";
 import { useIctStore } from "@/contexts/IctStore";
 import { getProjectExamStatus, getProjectLearningOpen, getSiteProject } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
-import { questionPoints } from "@/lib/numberInput";
 import type { ExamProgress, LearningProject, ProjectQuestion } from "@/types/ict";
 
 function answersEqual(a: Record<string, string>, b: Record<string, string>) {
@@ -109,6 +108,15 @@ function ExamWorkspace({
     setSaveError("");
     try {
       if (!ensureExamOpen()) return;
+      const missing = projectQuestions.filter((q) => {
+        if (q.answer_required === false) return false;
+        return !(answers[q.id] || "").trim();
+      });
+      if (missing.length > 0) {
+        setSaveError(`กรุณาตอบคำถามที่บังคับให้ครบก่อนส่ง (${missing.length} ข้อยังไม่ได้ตอบ)`);
+        setConfirmOpen(false);
+        return;
+      }
       const result = await submitExam(answers, currentProject?.id);
       if (!result.ok) {
         setSaveError(result.error);
@@ -169,19 +177,21 @@ function ExamWorkspace({
         </div>
 
         {exam?.graded_at && currentProject?.enable_results_visibility && (
-          <div className="mt-4 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+          <div className="mt-4 p-4 rounded-2xl bg-emerald-50 dark:bg-[rgba(61,143,130,0.18)] border border-emerald-200 dark:border-[var(--border-soft)] flex items-center justify-between gap-3">
             <div>
-              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">ผลการประเมินการทดสอบ:</span>
-              <div className="text-lg font-extrabold text-emerald-900 mt-0.5">
-                คะแนนที่ได้: {exam.score ?? 0} / {currentProject?.max_score ?? 5} คะแนน
+              <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">
+                ผลการประเมินการทดสอบ
+              </span>
+              <div className="text-base font-extrabold text-emerald-900 dark:text-emerald-100 mt-0.5">
+                {exam.passed ? "ท่านผ่านการทดสอบแล้ว" : "ยังไม่ผ่านเกณฑ์การทดสอบ"}
               </div>
             </div>
             <span
-              className={`px-4 py-1.5 rounded-full font-extrabold text-sm ${
+              className={`px-4 py-1.5 rounded-full font-extrabold text-sm shrink-0 ${
                 exam.passed ? "bg-emerald-600 text-white shadow" : "bg-red-500 text-white shadow"
               }`}
             >
-              {exam.passed ? "✓ ผ่านการทดสอบ (Passed)" : "✕ ไม่ผ่านเกณฑ์ (Failed)"}
+              {exam.passed ? "✓ ผ่าน (Passed)" : "✕ ไม่ผ่าน (Failed)"}
             </span>
           </div>
         )}
@@ -195,18 +205,18 @@ function ExamWorkspace({
         <div className="space-y-6">
           {projectQuestions.map((question, index) => (
             <div key={question.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <div className="flex justify-between items-start mb-4">
-                <h2 className="font-bold text-gray-800 text-base md:text-lg">
+              <div className="flex justify-between items-start mb-4 gap-2">
+                <h2 className="font-semibold text-base md:text-lg text-gray-800 dark:text-white">
                   {index + 1}. {question.prompt}
+                  {question.answer_required !== false && (
+                    <span className="text-[var(--accent-red)] ml-1" title="ต้องตอบก่อนส่ง">
+                      *
+                    </span>
+                  )}
                 </h2>
-                {questionPoints(question.points) > 0 && (
-                  <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100 shrink-0 ml-2">
-                    {questionPoints(question.points)} คะแนน
-                  </span>
-                )}
-                {questionPoints(question.points) === 0 && (
-                  <span className="text-xs font-bold text-gray-500 bg-gray-50 px-2.5 py-1 rounded-full border border-gray-200 shrink-0 ml-2">
-                    ไม่คิดคะแนน
+                {question.answer_required !== false && (
+                  <span className="text-[10px] font-bold text-red-700 dark:text-red-300 bg-red-50 px-2 py-0.5 rounded-full border border-red-100 shrink-0">
+                    บังคับตอบ
                   </span>
                 )}
               </div>
@@ -241,7 +251,7 @@ function ExamWorkspace({
                         onChange={() => setAnswer(question.id, option)}
                         className="mt-1 accent-[var(--primary-blue)]"
                       />
-                      <span className="text-sm text-gray-700">{option}</span>
+                      <span className="text-base text-gray-800 dark:text-white">{option}</span>
                     </label>
                   ))}
                 </div>

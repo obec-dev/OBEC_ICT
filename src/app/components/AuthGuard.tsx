@@ -11,6 +11,8 @@ type AuthGuardProps = {
   requireRoles?: AdminRole[];
   /** Allow access even when must_change_password is true */
   allowPasswordChange?: boolean;
+  /** Allow candidate access even when must_set_password is true */
+  allowPasswordSetup?: boolean;
 };
 
 export function AuthGuard({
@@ -18,6 +20,7 @@ export function AuthGuard({
   requireAdmin = false,
   requireRoles,
   allowPasswordChange = false,
+  allowPasswordSetup = false,
 }: AuthGuardProps) {
   const { hydrated, session, isAdmin } = useIctStore();
   const router = useRouter();
@@ -41,10 +44,27 @@ export function AuthGuard({
       router.replace("/admin/change-password");
       return;
     }
+    if (
+      session.kind === "candidate" &&
+      session.candidate.must_set_password &&
+      !allowPasswordSetup
+    ) {
+      router.replace("/login/reset-password");
+      return;
+    }
     if (requireRoles && session.kind === "admin" && !requireRoles.includes(session.admin.role)) {
       router.replace("/admin");
     }
-  }, [allowPasswordChange, hydrated, isAdmin, requireAdmin, requireRoles, router, session]);
+  }, [
+    allowPasswordChange,
+    allowPasswordSetup,
+    hydrated,
+    isAdmin,
+    requireAdmin,
+    requireRoles,
+    router,
+    session,
+  ]);
 
   if (!hydrated) {
     return (
@@ -62,6 +82,9 @@ export function AuthGuard({
     session.admin.must_change_password &&
     !allowPasswordChange
   ) {
+    return null;
+  }
+  if (session.kind === "candidate" && session.candidate.must_set_password && !allowPasswordSetup) {
     return null;
   }
   if (requireRoles && session.kind === "admin" && !requireRoles.includes(session.admin.role)) {

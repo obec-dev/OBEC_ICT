@@ -25,20 +25,20 @@ function TimelineItem({
       <span className="absolute left-0 top-1.5 w-3 h-3 rounded-full bg-[var(--primary-blue)] ring-4 ring-blue-100" />
       <div className="absolute left-[5px] top-5 bottom-0 w-px bg-blue-100 last:hidden" />
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1">
-        <h3 className="font-extrabold text-gray-900">{label}</h3>
-        <span className="text-xs font-bold text-[var(--primary-blue)] bg-blue-50 border border-blue-100 rounded-full px-2.5 py-0.5">
+        <h3 className="text-base font-semibold text-gray-800 dark:text-white">{label}</h3>
+        <span className="text-xs font-bold text-[var(--primary-blue)] dark:text-white bg-blue-50 dark:bg-white/10 border border-blue-100 dark:border-white/20 rounded-full px-2.5 py-0.5">
           {statusLabel}
         </span>
       </div>
-      <p className="text-sm text-gray-600">
+      <p className="text-sm text-gray-600 dark:text-white/90">
         {hasScheduleDate(start) || hasScheduleDate(end) ? (
           <>
-            <span className="font-semibold text-gray-800">{formatScheduleDate(start)}</span>
-            <span className="mx-2 text-gray-400">→</span>
-            <span className="font-semibold text-gray-800">{formatScheduleDate(end)}</span>
+            <span className="font-semibold text-gray-800 dark:text-white">{formatScheduleDate(start)}</span>
+            <span className="mx-2 text-gray-400 dark:text-white/50">→</span>
+            <span className="font-semibold text-gray-800 dark:text-white">{formatScheduleDate(end)}</span>
           </>
         ) : (
-          <span className="text-xs font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-2.5 py-0.5">
+          <span className="text-xs font-bold text-slate-600 dark:text-white/80 bg-slate-100 dark:bg-white/10 border border-slate-200 dark:border-white/20 rounded-full px-2.5 py-0.5">
             ยังไม่กำหนดวัน
           </span>
         )}

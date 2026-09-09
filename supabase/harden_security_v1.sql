@@ -176,7 +176,8 @@ SELECT
   options,
   image_url,
   points,
-  order_index
+  order_index,
+  answer_required
 FROM public.project_questions;
 
 GRANT SELECT ON public.public_project_questions TO anon, authenticated;
@@ -271,6 +272,7 @@ DECLARE
   v_id text := trim(COALESCE(p_profile_id, ''));
   v_school text := trim(COALESCE(p_school_id, ''));
   existing public.profiles;
+  v_birth date;
 BEGIN
   PERFORM set_config('row_security', 'off', true);
 
@@ -290,6 +292,12 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'error', 'เลขบัตรประชาชนนี้ถูกใช้ลงทะเบียนกับโรงเรียนอื่นแล้ว');
   END IF;
 
+  BEGIN
+    v_birth := NULLIF(trim(COALESCE(p_birth_date, '')), '')::date;
+  EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'วันเกิดไม่ถูกต้อง');
+  END;
+
   INSERT INTO public.profiles (
     profile_id, school_id, first_name, last_name, phone, remark, pdpa_accepted,
     title_key, title_en, title_th, title_other_en, title_other_th,
@@ -306,7 +314,7 @@ BEGIN
     NULLIF(trim(COALESCE(p_title_other_th, '')), ''),
     NULLIF(trim(COALESCE(p_eng_first_name, '')), ''),
     NULLIF(trim(COALESCE(p_eng_last_name, '')), ''),
-    NULLIF(trim(COALESCE(p_birth_date, '')), ''),
+    v_birth,
     NULLIF(trim(COALESCE(p_gender, '')), ''),
     NULLIF(trim(COALESCE(p_position, '')), ''),
     NULLIF(trim(COALESCE(p_duty, '')), ''),
@@ -453,7 +461,7 @@ BEGIN
   ORDER BY CASE WHEN project_id = v_project THEN 0 ELSE 1 END
   LIMIT 1;
 
-  IF existing.status = 'submitted' THEN
+  IF existing.status::text = 'submitted' THEN
     RETURN jsonb_build_object('ok', false, 'error', 'ส่งข้อสอบแล้ว ไม่สามารถแก้ไขได้');
   END IF;
 
@@ -463,7 +471,7 @@ BEGIN
     p.profile_id,
     v_project,
     COALESCE(p_answers, '{}'::jsonb),
-    v_status,
+    v_status::public.exam_status_enum,
     CASE WHEN v_status = 'submitted' THEN now() ELSE NULL END,
     now()
   )
@@ -471,11 +479,11 @@ BEGIN
     answers = EXCLUDED.answers,
     status = EXCLUDED.status,
     submitted_at = CASE
-      WHEN EXCLUDED.status = 'submitted' THEN COALESCE(public.exam_progress.submitted_at, now())
+      WHEN EXCLUDED.status::text = 'submitted' THEN COALESCE(public.exam_progress.submitted_at, now())
       ELSE public.exam_progress.submitted_at
     END,
     updated_at = now()
-  WHERE public.exam_progress.status IS DISTINCT FROM 'submitted';
+  WHERE public.exam_progress.status::text IS DISTINCT FROM 'submitted';
 
   RETURN jsonb_build_object('ok', true);
 EXCEPTION WHEN OTHERS THEN
@@ -823,11 +831,11 @@ BEGIN
     NULLIF(p_project->>'description', ''),
     COALESCE((p_project->>'is_active')::boolean, true),
     NULLIF(p_project->>'cover_url', ''),
-    NULLIF(p_project->>'reg_start', ''),
-    NULLIF(p_project->>'reg_end', ''),
+    NULLIF(p_project->>'reg_start', '')::timestamptz,
+    NULLIF(p_project->>'reg_end', '')::timestamptz,
     COALESCE((p_project->>'reg_enabled')::boolean, true),
-    NULLIF(p_project->>'exam_start', ''),
-    NULLIF(p_project->>'exam_end', ''),
+    NULLIF(p_project->>'exam_start', '')::timestamptz,
+    NULLIF(p_project->>'exam_end', '')::timestamptz,
     COALESCE((p_project->>'exam_enabled')::boolean, true),
     COALESCE((p_project->>'enable_results_visibility')::boolean, false),
     CASE WHEN p_project->>'pass_threshold_mode' = 'score' THEN 'score' ELSE 'percent' END,
@@ -947,7 +955,7 @@ BEGIN
 
   INSERT INTO public.project_questions (
     id, project_id, prompt, type, options, correct_answer, model_answer,
-    image_url, points, order_index
+    image_url, points, order_index, answer_required
   ) VALUES (
     v_id,
     trim(p_question->>'project_id'),
@@ -958,7 +966,8 @@ BEGIN
     NULLIF(p_question->>'model_answer', ''),
     NULLIF(p_question->>'image_url', ''),
     COALESCE((p_question->>'points')::integer, 1),
-    COALESCE((p_question->>'order_index')::integer, 0)
+    COALESCE((p_question->>'order_index')::integer, 0),
+    COALESCE((p_question->>'answer_required')::boolean, true)
   )
   ON CONFLICT (id) DO UPDATE SET
     project_id = EXCLUDED.project_id,
@@ -969,7 +978,8 @@ BEGIN
     model_answer = EXCLUDED.model_answer,
     image_url = EXCLUDED.image_url,
     points = EXCLUDED.points,
-    order_index = EXCLUDED.order_index;
+    order_index = EXCLUDED.order_index,
+    answer_required = EXCLUDED.answer_required;
 
   RETURN jsonb_build_object('ok', true);
 END;

@@ -10,27 +10,27 @@ export function Nav() {
   const isLoggedIn = Boolean(session);
 
   return (
-    <nav className="sticky top-0 z-50 w-full glass-effect transition-all duration-300">
+    <nav className="sticky top-0 z-50 w-full bg-white dark:bg-slate-900 opacity-100 shadow-md transition-all duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-20">
           <div className="flex items-center gap-8">
             <Link href="/" className="flex items-center group">
-              <span className="text-lg md:text-xl font-extrabold text-[var(--primary-blue)] tracking-tight">
+              <span className="text-xl md:text-2xl font-extrabold text-[var(--primary-blue)] tracking-tight">
                 ICT <span className="text-[var(--accent-red)]">Representative</span>
               </span>
             </Link>
 
-            <div className="hidden md:flex space-x-6 border-l-2 border-gray-100 dark:border-slate-700 pl-8 items-center">
+            <div className="hidden md:flex space-x-7 border-l-2 border-gray-100 dark:border-slate-700 pl-8 items-center">
               <Link
                 href="/dashboard"
-                className="text-[var(--primary-blue)] font-medium hover:text-[var(--accent-red)] transition-colors py-2"
+                className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
               >
                 ภาพรวม
               </Link>
               {!isLoggedIn && (
                 <Link
                   href="/register/consent"
-                  className="text-[var(--primary-blue)] font-medium hover:text-[var(--accent-red)] transition-colors py-2"
+                  className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
                 >
                   ลงทะเบียน
                 </Link>
@@ -39,13 +39,13 @@ export function Nav() {
                 <>
                   <Link
                     href="/portal/learn"
-                    className="text-[var(--primary-blue)] font-medium hover:text-[var(--accent-red)] transition-colors py-2"
+                    className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
                   >
                     บทเรียน
                   </Link>
                   <Link
                     href="/portal/exam"
-                    className="text-[var(--primary-blue)] font-medium hover:text-[var(--accent-red)] transition-colors py-2"
+                    className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
                   >
                     ข้อสอบ
                   </Link>
@@ -54,7 +54,7 @@ export function Nav() {
               {isAdmin && (
                 <Link
                   href="/admin"
-                  className="text-[var(--primary-blue)] font-medium hover:text-[var(--accent-red)] transition-colors py-2"
+                  className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
                 >
                   ผู้ดูแลระบบ
                 </Link>

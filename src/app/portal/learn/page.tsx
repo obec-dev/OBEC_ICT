@@ -299,10 +299,10 @@ function LearnContent() {
                 key={v.id}
                 type="button"
                 onClick={() => setSelectedVideoId(v.id)}
-                className={`px-4 py-2.5 rounded-2xl text-sm font-bold flex items-center gap-2 border transition-all ${
+                className={`px-4 py-2.5 rounded-2xl text-base font-semibold flex items-center gap-2 border transition-all ${
                   activeVideo?.id === v.id
-                    ? "border-[var(--primary-blue)] bg-blue-50/80 text-[var(--primary-blue)] shadow-sm"
-                    : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                    ? "border-[var(--primary-blue)] bg-blue-50/80 text-[var(--primary-blue)] dark:text-white shadow-sm"
+                    : "border-gray-200 bg-white text-gray-800 dark:text-white hover:border-gray-300"
                 }`}
               >
                 <span>
@@ -323,7 +323,7 @@ function LearnContent() {
 
       {activeVideo && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+          <h2 className="text-xl font-semibold text-gray-800 dark:text-white flex items-center gap-2">
             <span>{activeVideo.title}</span>
             {activeVideo.is_mandatory && (
               <span className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-3 py-0.5 rounded-full">

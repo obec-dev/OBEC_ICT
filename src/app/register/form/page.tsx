@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { useIctStore } from "@/contexts/IctStore";
+import {
+  EMPTY_ICT_SURVEY,
+  ICT_SURVEY_SECTIONS,
+  ICT_TALENT_COHORT_OPTIONS,
+  POSITION_OPTIONS,
+  SMS_USAGE_OPTIONS,
+  type IctSurvey,
+  type IctTalentCohort,
+} from "@/lib/registrationOptions";
 import { STORAGE_KEYS } from "@/lib/storage";
 import { getProjectRegistrationStatus, getSiteProject } from "@/lib/siteSettings";
 import { disabledInputClass, inputClass } from "@/lib/styles";
@@ -20,23 +29,26 @@ import type { School } from "@/types/ict";
 
 type PersonDraft = {
   key: string;
+  is_school_admin: boolean | null;
   profile_id: string;
   title_key: TitleKey | "";
   title_other_en: string;
   title_other_th: string;
-  eng_first_name: string;
-  eng_last_name: string;
   first_name: string;
   last_name: string;
+  eng_first_name: string;
+  eng_last_name: string;
+  gender: "" | "male" | "female" | "other";
   birth_day: string;
   birth_month: string;
   birth_year: string;
-  gender: "" | "male" | "female" | "other";
-  position: string;
-  duty: string;
   phone: string;
   line_id: string;
   email: string;
+  position: string;
+  duty: string;
+  ict_talent_cohort: IctTalentCohort | "";
+  ict_survey: IctSurvey;
 };
 
 const MONTHS = [
@@ -58,26 +70,42 @@ const currentYear = new Date().getFullYear();
 const YEARS = Array.from({ length: 80 }, (_, i) => String(currentYear - 15 - i));
 const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0"));
 
+function isNeverOption(opt: string): boolean {
+  return opt.startsWith("ยังไม่เคย") || opt.startsWith("ยังไม่มี");
+}
+
 function emptyPerson(): PersonDraft {
   return {
     key: crypto.randomUUID(),
+    is_school_admin: null,
     profile_id: "",
     title_key: "",
     title_other_en: "",
     title_other_th: "",
-    eng_first_name: "",
-    eng_last_name: "",
     first_name: "",
     last_name: "",
+    eng_first_name: "",
+    eng_last_name: "",
+    gender: "",
     birth_day: "",
     birth_month: "",
     birth_year: "",
-    gender: "",
-    position: "",
-    duty: "",
     phone: "",
     line_id: "",
     email: "",
+    position: "",
+    duty: "",
+    ict_talent_cohort: "",
+    ict_survey: {
+      ...EMPTY_ICT_SURVEY,
+      domain1_planning: [],
+      domain2_teacher_dev: [],
+      domain3_student_skills: [],
+      domain4_infra: [],
+      domain5_coordination: [],
+      domain6_monitoring: [],
+      sms_usage: [],
+    },
   };
 }
 
@@ -157,11 +185,50 @@ export default function RegisterFormPage() {
     setPersons((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
   };
 
+  const setSchoolAdmin = (personKey: string, value: boolean) => {
+    setPersons((prev) =>
+      prev.map((p) => ({
+        ...p,
+        is_school_admin: p.key === personKey ? value : value ? false : p.is_school_admin,
+      }))
+    );
+  };
+
   const setLinkedTitle = (personKey: string, titleKey: TitleKey | "") => {
     updatePerson(personKey, {
       title_key: titleKey,
       ...(titleKey !== "other" ? { title_other_en: "", title_other_th: "" } : {}),
     });
+  };
+
+  const toggleSurveyOption = (
+    personKey: string,
+    domainKey: (typeof ICT_SURVEY_SECTIONS)[number]["key"],
+    option: string,
+    checked: boolean
+  ) => {
+    setPersons((prev) =>
+      prev.map((p) => {
+        if (p.key !== personKey) return p;
+        const current = p.ict_survey[domainKey];
+        let next: string[];
+        if (checked) {
+          if (isNeverOption(option)) {
+            next = [option];
+          } else {
+            next = [...current.filter((o) => !isNeverOption(o)), option].filter(
+              (o, i, arr) => arr.indexOf(o) === i
+            );
+          }
+        } else {
+          next = current.filter((o) => o !== option);
+        }
+        return {
+          ...p,
+          ict_survey: { ...p.ict_survey, [domainKey]: next },
+        };
+      })
+    );
   };
 
   const addPerson = () => {
@@ -175,11 +242,18 @@ export default function RegisterFormPage() {
   const validatePersons = (): string | null => {
     const ids = new Set<string>();
     const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const schoolAdminCount = persons.filter((p) => p.is_school_admin === true).length;
+    if (schoolAdminCount > 1) {
+      return "ระบุผู้จัดการข้อมูลสถานศึกษาได้เพียง 1 คนต่อครั้งการลงทะเบียน";
+    }
 
     for (let i = 0; i < persons.length; i++) {
       const p = persons[i];
       const label = `คนที่ ${i + 1}`;
 
+      if (p.is_school_admin === null) {
+        return `${label}: กรุณาเลือกว่าท่านเป็นผู้ได้รับมอบหมายให้จัดการข้อมูลสถานศึกษาหรือไม่`;
+      }
       if (!/^\d{13}$/.test(p.profile_id.trim())) {
         return `${label}: เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก`;
       }
@@ -193,30 +267,24 @@ export default function RegisterFormPage() {
           return `${label}: กรุณากรอกคำนำหน้าชื่อ (Other / อื่นๆ) ทั้งภาษาอังกฤษและไทย`;
         }
       }
-      if (!p.eng_first_name.trim() || !ENG_NAME_RE.test(p.eng_first_name.trim())) {
-        return `${label}: Eng name ต้องเป็นตัวอักษรภาษาอังกฤษเท่านั้น`;
-      }
-      if (!p.eng_last_name.trim() || !ENG_NAME_RE.test(p.eng_last_name.trim())) {
-        return `${label}: Eng surname ต้องเป็นตัวอักษรภาษาอังกฤษเท่านั้น`;
-      }
       if (!p.first_name.trim() || !THAI_NAME_RE.test(p.first_name.trim())) {
         return `${label}: ชื่อไทยต้องเป็นตัวอักษรภาษาไทยเท่านั้น`;
       }
       if (!p.last_name.trim() || !THAI_NAME_RE.test(p.last_name.trim())) {
         return `${label}: นามสกุลไทยต้องเป็นตัวอักษรภาษาไทยเท่านั้น`;
       }
-      const birth = buildBirthDate(p.birth_day, p.birth_month, p.birth_year);
-      if (!birth) {
-        return `${label}: กรุณาเลือกวัน เดือน ปีเกิดให้ถูกต้อง`;
+      if (!p.eng_first_name.trim() || !ENG_NAME_RE.test(p.eng_first_name.trim())) {
+        return `${label}: Eng name ต้องเป็นตัวอักษรภาษาอังกฤษเท่านั้น`;
+      }
+      if (!p.eng_last_name.trim() || !ENG_NAME_RE.test(p.eng_last_name.trim())) {
+        return `${label}: Eng surname ต้องเป็นตัวอักษรภาษาอังกฤษเท่านั้น`;
       }
       if (!p.gender) {
         return `${label}: กรุณาเลือกเพศ`;
       }
-      if (!p.position.trim()) {
-        return `${label}: กรุณากรอกตำแหน่ง`;
-      }
-      if (!p.duty.trim()) {
-        return `${label}: กรุณากรอกหน้าที่`;
+      const birth = buildBirthDate(p.birth_day, p.birth_month, p.birth_year);
+      if (!birth) {
+        return `${label}: กรุณาเลือกวัน เดือน ปีเกิดให้ถูกต้อง`;
       }
       if (!p.phone.trim()) {
         return `${label}: กรุณากรอกเบอร์โทรศัพท์`;
@@ -226,6 +294,21 @@ export default function RegisterFormPage() {
       }
       if (!p.email.trim() || !emailRe.test(p.email.trim())) {
         return `${label}: กรุณากรอกอีเมลให้ถูกต้อง`;
+      }
+      if (!p.position.trim() || !(POSITION_OPTIONS as readonly string[]).includes(p.position.trim())) {
+        return `${label}: กรุณาเลือกตำแหน่ง`;
+      }
+      if (!p.ict_talent_cohort) {
+        return `${label}: กรุณาเลือกประวัติ ICT Talent`;
+      }
+      for (const section of ICT_SURVEY_SECTIONS) {
+        const selected = p.ict_survey[section.key];
+        if (!selected.length) {
+          return "มีคำถามที่ยังไม่ได้ตอบ กรุณาตรวจสอบอีกครั้ง";
+        }
+      }
+      if (!Array.isArray(p.ict_survey.sms_usage) || p.ict_survey.sms_usage.length === 0) {
+        return "มีคำถามที่ยังไม่ได้ตอบ กรุณาตรวจสอบอีกครั้ง";
       }
 
       const id = p.profile_id.trim();
@@ -293,9 +376,12 @@ export default function RegisterFormPage() {
         birth_date,
         gender: p.gender,
         position: p.position.trim(),
-        duty: p.duty.trim(),
+        duty: "",
         line_id: p.line_id.trim(),
         email: p.email.trim(),
+        is_school_admin: p.is_school_admin === true,
+        ict_talent_cohort: p.ict_talent_cohort,
+        ict_survey: p.ict_survey,
         project_id: siteProject.id,
       });
       if (!result.ok) {
@@ -450,6 +536,9 @@ export default function RegisterFormPage() {
               </span>
               ข้อมูลผู้สมัคร (ทั้งหมด {persons.length} คน)
             </div>
+            <p className="text-xs text-gray-500 px-1">
+              ผู้จัดการข้อมูลสถานศึกษาได้เพียง 1 คนต่อโรงเรียน — หากโรงเรียนมีผู้จัดการอยู่แล้ว ระบบจะแจ้งข้อผิดพลาด
+            </p>
 
             {persons.map((person, index) => {
               const isOther = person.title_key === "other";
@@ -475,7 +564,36 @@ export default function RegisterFormPage() {
                   <div className="p-6 space-y-4">
                     <div>
                       <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                        Personal ID / เลขบัตรประชาชน
+                        ท่านเป็นผู้ได้รับมอบหมายให้จัดการข้อมูลสถานศึกษาหรือไม่?{" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <div className="flex flex-wrap gap-4">
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                          <input
+                            type="radio"
+                            name={`school-admin-${person.key}`}
+                            checked={person.is_school_admin === true}
+                            disabled={submitting}
+                            onChange={() => setSchoolAdmin(person.key, true)}
+                          />
+                          ใช่
+                        </label>
+                        <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                          <input
+                            type="radio"
+                            name={`school-admin-${person.key}`}
+                            checked={person.is_school_admin === false}
+                            disabled={submitting}
+                            onChange={() => setSchoolAdmin(person.key, false)}
+                          />
+                          ไม่ใช่
+                        </label>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        เลขบัตรประชาชน
                       </label>
                       <input
                         className={inputClass}
@@ -492,65 +610,28 @@ export default function RegisterFormPage() {
                       />
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                          Eng Title
-                        </label>
-                        <select
-                          className={inputClass}
-                          required
-                          value={person.title_key}
-                          disabled={submitting}
-                          onChange={(e) => setLinkedTitle(person.key, e.target.value as TitleKey | "")}
-                        >
-                          <option value="">-- Select --</option>
-                          {TITLE_OPTIONS.map((t) => (
-                            <option key={t.key} value={t.key}>
-                              {t.en}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                          Thai Title / คำนำหน้า
-                        </label>
-                        <select
-                          className={inputClass}
-                          required
-                          value={person.title_key}
-                          disabled={submitting}
-                          onChange={(e) => setLinkedTitle(person.key, e.target.value as TitleKey | "")}
-                        >
-                          <option value="">-- เลือก --</option>
-                          {TITLE_OPTIONS.map((t) => (
-                            <option key={t.key} value={t.key}>
-                              {t.th}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        คำนำหน้า
+                      </label>
+                      <select
+                        className={inputClass}
+                        required
+                        value={person.title_key}
+                        disabled={submitting}
+                        onChange={(e) => setLinkedTitle(person.key, e.target.value as TitleKey | "")}
+                      >
+                        <option value="">-- เลือก --</option>
+                        {TITLE_OPTIONS.map((t) => (
+                          <option key={t.key} value={t.key}>
+                            {t.th} / {t.en}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    <p className="text-xs text-gray-500 -mt-2">
-                      คำนำหน้า EN และ TH เชื่อมกัน — เปลี่ยนฝั่งใดฝั่งหนึ่ง อีกฝั่งจะเปลี่ยนตาม
-                    </p>
 
                     {isOther && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                            Other title (EN)
-                          </label>
-                          <input
-                            className={inputClass}
-                            required
-                            value={person.title_other_en}
-                            disabled={submitting}
-                            placeholder="Please specify"
-                            onChange={(e) => updatePerson(person.key, { title_other_en: e.target.value })}
-                          />
-                        </div>
                         <div>
                           <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                             คำนำหน้าอื่นๆ (TH)
@@ -561,7 +642,28 @@ export default function RegisterFormPage() {
                             value={person.title_other_th}
                             disabled={submitting}
                             placeholder="กรุณาระบุ"
-                            onChange={(e) => updatePerson(person.key, { title_other_th: e.target.value })}
+                            onChange={(e) =>
+                              updatePerson(person.key, {
+                                title_other_th: filterThaiOnly(e.target.value),
+                              })
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                            Other title (EN)
+                          </label>
+                          <input
+                            className={inputClass}
+                            required
+                            value={person.title_other_en}
+                            disabled={submitting}
+                            placeholder="Please specify"
+                            onChange={(e) =>
+                              updatePerson(person.key, {
+                                title_other_en: filterEnglishOnly(e.target.value),
+                              })
+                            }
                           />
                         </div>
                       </div>
@@ -570,35 +672,33 @@ export default function RegisterFormPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                          Eng name
+                          ชื่อ (ภาษาไทย)
                         </label>
                         <input
                           className={inputClass}
                           required
-                          lang="en"
-                          autoCapitalize="words"
-                          value={person.eng_first_name}
+                          lang="th"
+                          value={person.first_name}
                           disabled={submitting}
-                          placeholder="English only"
+                          placeholder="ชื่อ ภาษาไทยเท่านั้น"
                           onChange={(e) =>
-                            updatePerson(person.key, { eng_first_name: filterEnglishOnly(e.target.value) })
+                            updatePerson(person.key, { first_name: filterThaiOnly(e.target.value) })
                           }
                         />
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                          Eng surname
+                          นามสกุล (ภาษาไทย)
                         </label>
                         <input
                           className={inputClass}
                           required
-                          lang="en"
-                          autoCapitalize="words"
-                          value={person.eng_last_name}
+                          lang="th"
+                          value={person.last_name}
                           disabled={submitting}
-                          placeholder="English only"
+                          placeholder="นามสกุล ภาษาไทยเท่านั้น"
                           onChange={(e) =>
-                            updatePerson(person.key, { eng_last_name: filterEnglishOnly(e.target.value) })
+                            updatePerson(person.key, { last_name: filterThaiOnly(e.target.value) })
                           }
                         />
                       </div>
@@ -607,36 +707,58 @@ export default function RegisterFormPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                          ชื่อ (ไทย)
+                        ชื่อ (ภาษาอังกฤษ)
                         </label>
                         <input
                           className={inputClass}
                           required
-                          lang="th"
-                          value={person.first_name}
+                          lang="en"
+                          autoCapitalize="words"
+                          value={person.eng_first_name}
                           disabled={submitting}
-                          placeholder="ภาษาไทยเท่านั้น"
+                          placeholder="ชื่อ ภาษาอังกฤษเท่านั้น"
                           onChange={(e) =>
-                            updatePerson(person.key, { first_name: filterThaiOnly(e.target.value) })
+                            updatePerson(person.key, { eng_first_name: filterEnglishOnly(e.target.value) })
                           }
                         />
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                          นามสกุล (ไทย)
+                         นามสกุล (ภาษาอังกฤษ)
                         </label>
                         <input
                           className={inputClass}
                           required
-                          lang="th"
-                          value={person.last_name}
+                          lang="en"
+                          autoCapitalize="words"
+                          value={person.eng_last_name}
                           disabled={submitting}
-                          placeholder="ภาษาไทยเท่านั้น"
+                          placeholder="นามสกุล ภาษาอังกฤษเท่านั้น"
                           onChange={(e) =>
-                            updatePerson(person.key, { last_name: filterThaiOnly(e.target.value) })
+                            updatePerson(person.key, { eng_last_name: filterEnglishOnly(e.target.value) })
                           }
                         />
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">เพศ / Gender</label>
+                      <select
+                        className={inputClass}
+                        required
+                        value={person.gender}
+                        disabled={submitting}
+                        onChange={(e) =>
+                          updatePerson(person.key, {
+                            gender: e.target.value as PersonDraft["gender"],
+                          })
+                        }
+                      >
+                        <option value="">-- เลือก --</option>
+                        <option value="male">ชาย / Male</option>
+                        <option value="female">หญิง / Female</option>
+                        <option value="other">อื่นๆ / Other</option>
+                      </select>
                     </div>
 
                     <div>
@@ -689,54 +811,6 @@ export default function RegisterFormPage() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">เพศ / Gender</label>
-                      <select
-                        className={inputClass}
-                        required
-                        value={person.gender}
-                        disabled={submitting}
-                        onChange={(e) =>
-                          updatePerson(person.key, {
-                            gender: e.target.value as PersonDraft["gender"],
-                          })
-                        }
-                      >
-                        <option value="">-- เลือก --</option>
-                        <option value="male">ชาย / Male</option>
-                        <option value="female">หญิง / Female</option>
-                        <option value="other">อื่นๆ / Other</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                        ตำแหน่ง / Position
-                      </label>
-                      <input
-                        className={inputClass}
-                        required
-                        value={person.position}
-                        disabled={submitting}
-                        placeholder="ครูชำนาญการ"
-                        onChange={(e) => updatePerson(person.key, { position: e.target.value })}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                        หน้าที่ / Duty
-                      </label>
-                      <input
-                        className={inputClass}
-                        required
-                        value={person.duty}
-                        disabled={submitting}
-                        placeholder="สอนวิชา ... ระดับชั้น ..."
-                        onChange={(e) => updatePerson(person.key, { duty: e.target.value })}
-                      />
-                    </div>
-
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
@@ -750,7 +824,7 @@ export default function RegisterFormPage() {
                           disabled={submitting}
                           onChange={(e) => updatePerson(person.key, { phone: e.target.value })}
                         />
-                        <p className="text-xs text-gray-500 mt-1">ใช้สำหรับเข้าสู่ระบบ</p>
+                        <p className="text-xs text-gray-500 mt-1">ใช้ยืนยันตัวตนเมื่อตั้ง/รีเซ็ตรหัสผ่าน</p>
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
@@ -779,6 +853,120 @@ export default function RegisterFormPage() {
                         disabled={submitting}
                         onChange={(e) => updatePerson(person.key, { email: e.target.value })}
                       />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        ตำแหน่ง / Position
+                      </label>
+                      <select
+                        className={inputClass}
+                        required
+                        value={person.position}
+                        disabled={submitting}
+                        onChange={(e) => updatePerson(person.key, { position: e.target.value })}
+                      >
+                        <option value="">-- เลือก --</option>
+                        {POSITION_OPTIONS.map((pos) => (
+                          <option key={pos} value={pos}>
+                            {pos}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        ท่านเคยเป็นสมาชิกของ ICT Talent หรือไม่?
+                      </label>
+                      <select
+                        className={inputClass}
+                        required
+                        value={person.ict_talent_cohort}
+                        disabled={submitting}
+                        onChange={(e) =>
+                          updatePerson(person.key, {
+                            ict_talent_cohort: e.target.value as IctTalentCohort | "",
+                          })
+                        }
+                      >
+                        <option value="">-- เลือก --</option>
+                        {ICT_TALENT_COHORT_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-5 pt-2 border-t border-gray-100">
+                      <p className="text-sm font-bold text-[var(--primary-blue)]">
+                        แบบสำรวจประสบการณ์ด้าน ICT
+                      </p>
+                      <p className="text-xs text-gray-500 -mt-3">
+                        แต่ละด้านเลือกได้อย่างน้อย 1 รายการ (เลือก “ยังไม่เคย…” ได้เพียงอย่างเดียวในด้านนั้น)
+                      </p>
+
+                      {ICT_SURVEY_SECTIONS.map((section) => (
+                        <fieldset key={section.key} className="space-y-2">
+                          <legend className="text-sm font-semibold text-gray-800">{section.title}</legend>
+                          <div className="space-y-1.5 pl-1">
+                            {section.options.map((opt) => {
+                              const checked = person.ict_survey[section.key].includes(opt);
+                              return (
+                                <label
+                                  key={opt}
+                                  className="flex items-start gap-2 text-sm text-gray-700"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="mt-1"
+                                    checked={checked}
+                                    disabled={submitting}
+                                    onChange={(e) =>
+                                      toggleSurveyOption(person.key, section.key, opt, e.target.checked)
+                                    }
+                                  />
+                                  <span>{opt}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </fieldset>
+                      ))}
+
+                      <div>
+                        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                          การใช้งานระบบ SMS (School Management System)
+                        </label>
+                        <p className="text-xs text-gray-500 mb-2">เลือกได้มากกว่า 1 ข้อ</p>
+                        <div className="space-y-2 rounded-xl border border-gray-200 p-3 bg-gray-50/50">
+                          {SMS_USAGE_OPTIONS.map((opt, idx) => {
+                            const checked = person.ict_survey.sms_usage.includes(opt);
+                            return (
+                              <label key={opt} className="flex items-start gap-2 text-sm text-gray-700">
+                                <input
+                                  type="checkbox"
+                                  className="mt-1"
+                                  checked={checked}
+                                  disabled={submitting}
+                                  onChange={(e) => {
+                                    const next = e.target.checked
+                                      ? [...person.ict_survey.sms_usage, opt]
+                                      : person.ict_survey.sms_usage.filter((x) => x !== opt);
+                                    updatePerson(person.key, {
+                                      ict_survey: { ...person.ict_survey, sms_usage: next },
+                                    });
+                                  }}
+                                />
+                                <span>
+                                  {idx + 1}. {opt}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

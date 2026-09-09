@@ -92,6 +92,7 @@ function ProjectsManagementContent() {
     model_answer: string;
     image_url: string;
     points: number;
+    answer_required: boolean;
   }>({
     id: "",
     project_id: selectedProjectId,
@@ -102,6 +103,7 @@ function ProjectsManagementContent() {
     model_answer: "",
     image_url: "",
     points: 1,
+    answer_required: true,
   });
   const [isEditingQ, setIsEditingQ] = useState(false);
 
@@ -330,6 +332,7 @@ function ProjectsManagementContent() {
       model_answer: qForm.type === "open_ended" ? qForm.model_answer.trim() : undefined,
       image_url: qForm.image_url.trim() || null,
       points: Number.isFinite(Number(qForm.points)) ? Math.max(0, Number(qForm.points)) : 1,
+      answer_required: qForm.answer_required !== false,
       order_index: isEditingQ
         ? projectQuestions.find((q) => q.id === qForm.id)?.order_index ?? projectQuestions.length + 1
         : projectQuestions.length + 1,
@@ -872,15 +875,11 @@ function ProjectsManagementContent() {
                             </div>
                             <p className="text-xs text-gray-600 mb-2">{regLive.message}</p>
                             <p className="text-xs text-gray-600">
-                              สถานะ: {currentProject.reg_enabled ? "เปิด" : "ปิด"}
-                            </p>
-                            <p className="text-xs text-gray-600">
                               เริ่ม: {currentProject.reg_start ? formatDateTimeTh(currentProject.reg_start) : (
                                 <span className="inline-block ml-1 text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5">
                                   ยังไม่กำหนดวัน
                                 </span>
                               )}
-                              {!currentProject.reg_start && currentProject.reg_enabled ? "" : ""}
                             </p>
                             <p className="text-xs text-gray-600 mt-1">
                               สิ้นสุด: {currentProject.reg_end ? formatDateTimeTh(currentProject.reg_end) : (
@@ -904,15 +903,11 @@ function ProjectsManagementContent() {
                             </div>
                             <p className="text-xs text-gray-600 mb-2">{examLive.message}</p>
                             <p className="text-xs text-gray-600">
-                              สถานะ: {currentProject.exam_enabled ? "เปิด" : "ปิด"}
-                            </p>
-                            <p className="text-xs text-gray-600">
                               เริ่ม: {currentProject.exam_start ? formatDateTimeTh(currentProject.exam_start) : (
                                 <span className="inline-block ml-1 text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5">
                                   ยังไม่กำหนดวัน
                                 </span>
                               )}
-                              {!currentProject.exam_start && currentProject.exam_enabled ? "" : ""}
                             </p>
                             <p className="text-xs text-gray-600 mt-1">
                               สิ้นสุด: {currentProject.exam_end ? formatDateTimeTh(currentProject.exam_end) : (
@@ -1046,6 +1041,7 @@ function ProjectsManagementContent() {
                           model_answer: "",
                           image_url: "",
                           points: 1,
+                          answer_required: true,
                         });
                         setIsEditingQ(false);
                         setShowQuestionModal(true);
@@ -1081,9 +1077,44 @@ function ProjectsManagementContent() {
                               <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2.5 py-0.5 rounded-md">
                                 {typeof q.points === "number" ? q.points : 1} คะแนน
                               </span>
+                              <span
+                                className={`text-xs font-bold px-2.5 py-0.5 rounded-md ${
+                                  q.answer_required !== false
+                                    ? "bg-red-50 text-red-700 border border-red-100"
+                                    : "bg-slate-50 text-slate-500 border border-slate-200"
+                                }`}
+                              >
+                                {q.answer_required !== false ? "บังคับตอบ" : "ไม่บังคับตอบ"}
+                              </span>
                             </div>
 
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 flex-wrap justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void saveProjectQuestion({
+                                    ...q,
+                                    answer_required: q.answer_required === false,
+                                  }).then((res) => {
+                                    if (res.ok) {
+                                      showStatus(
+                                        q.answer_required === false
+                                          ? "ตั้งเป็นบังคับตอบแล้ว"
+                                          : "ยกเลิกการบังคับตอบแล้ว"
+                                      );
+                                    } else {
+                                      showStatus(res.error || "อัปเดตไม่สำเร็จ", true);
+                                    }
+                                  });
+                                }}
+                                className={`text-xs font-bold px-3 py-1.5 rounded-lg ${
+                                  q.answer_required !== false
+                                    ? "text-red-700 bg-red-50 hover:bg-red-100"
+                                    : "text-slate-600 bg-slate-100 hover:bg-slate-200"
+                                }`}
+                              >
+                                {q.answer_required !== false ? "✓ บังคับตอบ" : "+ ตั้งบังคับตอบ"}
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1097,6 +1128,7 @@ function ProjectsManagementContent() {
                                     model_answer: q.model_answer || "",
                                     image_url: q.image_url || "",
                                     points: typeof q.points === "number" ? q.points : 1,
+                                    answer_required: q.answer_required !== false,
                                   });
                                   setIsEditingQ(true);
                                   setShowQuestionModal(true);
@@ -1444,6 +1476,17 @@ function ProjectsManagementContent() {
                 />
                 <p className="text-[11px] text-gray-500 mt-1">ตั้งเป็น 0 สำหรับข้อสอบแบบสำรวจ/ไม่คิดคะแนน</p>
               </div>
+
+              <label className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={qForm.answer_required}
+                  onChange={(e) => setQForm((prev) => ({ ...prev, answer_required: e.target.checked }))}
+                />
+                <span className="text-sm font-semibold text-gray-700">
+                  บังคับตอบก่อนส่งข้อสอบ (answer required)
+                </span>
+              </label>
 
               {qForm.type === "mcq" && (
                 <div className="p-4 bg-purple-50/50 rounded-2xl border border-purple-100">

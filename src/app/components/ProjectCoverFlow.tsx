@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, type CSSProperties } from "react";
+import { useTheme } from "@/app/components/ThemeProvider";
 import { useIctStore } from "@/contexts/IctStore";
 import {
   getProjectActivityBadges,
@@ -14,7 +15,18 @@ import type { LearningProject } from "@/types/ict";
 const DEFAULT_GRADIENT =
   "linear-gradient(135deg, #112652 0%, #1e4d8c 55%, #2a9d8f 100%)";
 
-function coverStyle(project: LearningProject): CSSProperties {
+function coverStyle(project: LearningProject, isDark: boolean): CSSProperties {
+  if (isDark) {
+    if (project.cover_url) {
+      return {
+        backgroundImage: `linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.88)), url(${project.cover_url})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundColor: "#000000",
+      };
+    }
+    return { background: "#000000" };
+  }
   if (project.cover_url) {
     return {
       backgroundImage: `linear-gradient(180deg, rgba(17,38,82,0.2), rgba(17,38,82,0.78)), url(${project.cover_url})`,
@@ -41,6 +53,8 @@ export function ProjectCoverFlow({
   hasSession?: boolean;
 }) {
   const { session, getExamFor } = useIctStore();
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   const project = useMemo(() => getSiteProject(projects), [projects]);
   if (!project || project.is_active === false) return null;
 
@@ -61,7 +75,7 @@ export function ProjectCoverFlow({
       <div className="max-w-4xl mx-auto">
         <article
           className="relative h-64 md:h-72 rounded-[2rem] overflow-hidden shadow-[0_22px_60px_rgba(17,38,82,0.22)] text-white"
-          style={coverStyle(project)}
+          style={coverStyle(project, isDark)}
         >
           <div className="absolute inset-0 p-7 md:p-10 flex flex-col justify-between">
             <div className="flex flex-wrap gap-2">

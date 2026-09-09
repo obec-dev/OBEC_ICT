@@ -5,7 +5,7 @@ import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
 import { getSiteProject } from "@/lib/siteSettings";
-import { adminDeleteProfileRpc, adminListExamProgressRpc, adminSearchProfiles } from "@/lib/supabase/admin";
+import { adminDeleteExamProgressRpc, adminListExamProgressRpc, adminSearchProfiles } from "@/lib/supabase/admin";
 import { inputClass } from "@/lib/styles";
 import type { Candidate, ExamProgress } from "@/types/ict";
 
@@ -14,8 +14,10 @@ function examStatusLabel(exam: ExamProgress | undefined): { text: string; classN
   if (exam.status === "submitted") {
     // Show pass/fail only after grading has been run
     if (exam.graded_at) {
-      if (exam.passed === true) return { text: "ส่งแล้ว · ผ่าน", className: "bg-emerald-100 text-emerald-800" };
-      if (exam.passed === false) return { text: "ส่งแล้ว · ไม่ผ่าน", className: "bg-red-100 text-red-800" };
+      if (exam.passed === true)
+        return { text: "ส่งแล้ว · ผ่าน", className: "bg-emerald-100 text-emerald-800" };
+      if (exam.passed === false)
+        return { text: "ส่งแล้ว · ไม่ผ่าน", className: "bg-red-100 text-red-800" };
     }
     return { text: "ส่งข้อสอบแล้ว", className: "bg-blue-100 text-blue-800" };
   }
@@ -107,16 +109,30 @@ function CandidatesContent() {
     }
   };
 
-  const deleteOne = async (profileId: string) => {
+  const clearExamData = async (profileId: string) => {
     if (!adminToken) return;
-    if (!confirm("ลบผู้สมัครรายนี้?")) return;
-    const result = await adminDeleteProfileRpc(adminToken, profileId);
+    if (
+      !confirm(
+        "ล้างข้อมูลข้อสอบของผู้สมัครรายนี้?\n(ลบเฉพาะความคืบหน้า/คำตอบข้อสอบ — โปรไฟล์ผู้สมัครยังคงอยู่)"
+      )
+    ) {
+      return;
+    }
+    const result = await adminDeleteExamProgressRpc(adminToken, profileId, projectId);
     if (!result.ok) {
       setError(result.error);
       return;
     }
-    setResults((prev) => prev.filter((p) => p.id !== profileId));
-    setMessage("ลบผู้สมัครแล้ว");
+    setExamMap((prev) => {
+      const next = { ...prev };
+      delete next[profileId];
+      return next;
+    });
+    setMessage(
+      result.deleted > 0
+        ? "ล้างข้อมูลข้อสอบแล้ว — โปรไฟล์ผู้สมัครยังคงอยู่ในระบบ"
+        : "ไม่พบข้อมูลข้อสอบให้ลบ (โปรไฟล์ยังคงอยู่)"
+    );
     void refreshData();
   };
 
@@ -246,9 +262,9 @@ function CandidatesContent() {
                         <button
                           type="button"
                           className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[var(--accent-red)] font-bold text-xs"
-                          onClick={() => void deleteOne(p.id)}
+                          onClick={() => void clearExamData(p.id)}
                         >
-                          ลบ
+                          ล้างข้อมูลสอบ
                         </button>
                       </div>
                     </td>

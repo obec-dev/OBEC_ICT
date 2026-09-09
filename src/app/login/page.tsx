@@ -10,7 +10,7 @@ export default function LoginPage() {
   const { login } = useIctStore();
   const router = useRouter();
   const [profileId, setProfileId] = useState("");
-  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -19,10 +19,14 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setSubmitting(true);
-    const result = await login(profileId, phone);
+    const result = await login(profileId.trim(), password);
     setSubmitting(false);
     if (!result.ok) {
-      setError(result.error);
+      if (result.needPasswordSetup) {
+        router.push(`/login/reset-password?id=${encodeURIComponent(profileId.trim())}`);
+        return;
+      }
+      setError(result.error || "เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบเลขบัตรประชาชนและรหัสผ่าน");
       return;
     }
     router.push("/");
@@ -33,26 +37,34 @@ export default function LoginPage() {
       <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8">
         <h1 className="text-2xl font-extrabold text-[var(--primary-blue)] mb-2">เข้าสู่ระบบ</h1>
         <p className="text-gray-500 mb-6 text-sm">
-          ขณะนี้เป็นช่วงลงทะเบียนเท่านั้น — วันเปิดเข้าสู่ระบบเรียน/สอบจะประกาศภายหลัง
-          (บัญชีผู้ดูแลระบบยังเข้าใช้ได้ตามปกติ)
+          ใช้เลขบัตรประชาชนและรหัสผ่านที่ตั้งไว้
+          (บัญชีผู้ดูแลระบบยังเข้าใช้ได้ตามปกติที่เมนูผู้ดูแลระบบ)
         </p>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
               เลขบัตรประชาชน
             </label>
-            <input className={inputClass} value={profileId} onChange={(e) => setProfileId(e.target.value)} required />
+            <input
+              className={inputClass}
+              inputMode="numeric"
+              maxLength={13}
+              value={profileId}
+              onChange={(e) => setProfileId(e.target.value.replace(/\D/g, "").slice(0, 13))}
+              required
+            />
           </div>
           <div>
             <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-              เบอร์โทรศัพท์
+              รหัสผ่าน
             </label>
             <div className="relative">
               <input
                 className={`${inputClass} pr-12`}
                 type={showPassword ? "text" : "password"}
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
                 required
               />
               <button
@@ -78,21 +90,28 @@ export default function LoginPage() {
           {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
           <button
             type="submit"
-            disabled={!profileId || !phone || submitting}
+            disabled={!profileId || !password || submitting}
             className="w-full rounded-full bg-[var(--primary-blue)] text-white py-3.5 font-bold disabled:opacity-40 hover:-translate-y-0.5 transition-all"
           >
             {submitting ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
           </button>
         </div>
-        <p className="text-center text-sm text-gray-500 mt-6">
-          ยังไม่มีบัญชี?{" "}
-          <Link href="/register/consent" className="text-[var(--accent-red)] font-semibold">
-            ลงทะเบียน
-          </Link>
-          <span className="mx-2">·</span>
-          <Link href="/admin/login" className="text-[var(--primary-blue)] font-semibold">
-            ผู้ดูแลระบบ
-          </Link>
+        <p className="text-center text-sm text-gray-500 mt-6 space-y-2">
+          <span className="block">
+            <Link href="/login/reset-password" className="text-[var(--primary-blue)] font-semibold">
+              ลืมรหัสผ่าน / ตั้งรหัสผ่านใหม่
+            </Link>
+          </span>
+          <span className="block">
+            ยังไม่มีบัญชี?{" "}
+            <Link href="/register/consent" className="text-[var(--accent-red)] font-semibold">
+              ลงทะเบียน
+            </Link>
+            <span className="mx-2">·</span>
+            <Link href="/admin/login" className="text-[var(--primary-blue)] font-semibold">
+              ผู้ดูแลระบบ
+            </Link>
+          </span>
         </p>
       </form>
     </div>

@@ -33,6 +33,10 @@ type ProfileRow = {
   email?: string | null;
   created_at: string | null;
   schools?: { school_name: string } | { school_name: string }[] | null;
+  is_school_admin?: boolean | null;
+  must_set_password?: boolean | null;
+  ict_talent_cohort?: string | null;
+  ict_survey?: Record<string, unknown> | null;
 };
 
 function districtName(row: SchoolRow): string {
@@ -93,6 +97,14 @@ export function mapProfileRow(row: ProfileRow): Candidate {
     duty: row.duty ?? undefined,
     line_id: row.line_id ?? undefined,
     email: row.email ?? undefined,
+    is_school_admin: Boolean(row.is_school_admin),
+    must_set_password: row.must_set_password !== false && row.must_set_password !== undefined
+      ? Boolean(row.must_set_password)
+      : row.must_set_password === false
+        ? false
+        : undefined,
+    ict_talent_cohort: row.ict_talent_cohort ?? undefined,
+    ict_survey: row.ict_survey ?? undefined,
     created_at: row.created_at ?? new Date().toISOString(),
   };
 }
@@ -137,17 +149,34 @@ export async function fetchSchoolTotals(): Promise<SchoolTotals> {
   };
 }
 
-/** Load schools only for one district (on card expand) */
+/** Load schools only for one district (on card expand) — includes people count */
 export async function fetchSchoolsByDistrict(districtId: string): Promise<School[]> {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("schools")
-    .select("school_id, school_name, province, is_registered, district_id, districts(district_name)")
-    .eq("district_id", districtId)
-    .order("school_name");
+  const { data, error } = await supabase.rpc("get_schools_by_district", {
+    p_district_id: districtId,
+  });
 
   if (error) throw new Error(error.message);
-  return ((data as SchoolRow[] | null) ?? []).map(mapSchoolRow);
+
+  type Row = {
+    school_id: string;
+    school_name: string;
+    province: string;
+    district_id: string;
+    district_name: string;
+    is_registered: boolean;
+    registered_count: number | string;
+  };
+
+  return ((data as Row[] | null) ?? []).map((row) => ({
+    school_id: row.school_id,
+    school_name: row.school_name,
+    area_zone: row.district_name || row.district_id,
+    province: row.province,
+    is_registered: Boolean(row.is_registered),
+    district_id: row.district_id,
+    registered_count: Number(row.registered_count) || 0,
+  }));
 }
 
 /** Register form lookup — 1 row */
@@ -209,6 +238,13 @@ function mapRpcProfileJson(raw: Record<string, unknown>): Candidate {
     email: raw.email == null ? null : String(raw.email),
     created_at: raw.created_at == null ? null : String(raw.created_at),
     schools: raw.school_name ? { school_name: String(raw.school_name) } : null,
+    is_school_admin: Boolean(raw.is_school_admin),
+    must_set_password: raw.must_set_password == null ? true : Boolean(raw.must_set_password),
+    ict_talent_cohort: raw.ict_talent_cohort == null ? null : String(raw.ict_talent_cohort),
+    ict_survey:
+      raw.ict_survey && typeof raw.ict_survey === "object"
+        ? (raw.ict_survey as Record<string, unknown>)
+        : null,
   });
 }
 
@@ -235,6 +271,9 @@ export type RegisterProfileInput = {
   duty: string;
   line_id: string;
   email: string;
+  is_school_admin?: boolean;
+  ict_talent_cohort?: string;
+  ict_survey?: Record<string, unknown>;
 };
 
 function asRpcObj(data: unknown): Record<string, unknown> {
@@ -288,6 +327,9 @@ export async function insertProfile(input: RegisterProfileInput): Promise<Candid
     p_duty: input.duty.trim(),
     p_line_id: input.line_id.trim(),
     p_email: input.email.trim().toLowerCase(),
+    p_is_school_admin: input.is_school_admin === true,
+    p_ict_talent_cohort: input.ict_talent_cohort || null,
+    p_ict_survey: input.ict_survey ?? {},
   });
   if (error) throw new Error(error.message);
 
@@ -360,21 +402,125 @@ export async function findProfileForLogin(profileId: string, phone: string): Pro
     p_profile_id: profileId.trim(),
     p_phone: phone.trim(),
   });
-  if (error) {
-    // Surface PostgREST/RPC errors (missing function, grants, etc.)
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 
   const row = asRpcObj(data);
   if (!row.ok) {
     const msg = String(row.error ?? "");
-    if (msg && !/เลขบัตร|ไม่ถูกต้อง|invalid/i.test(msg)) {
-      throw new Error(msg);
-    }
+    if (msg) throw new Error(msg);
     return null;
   }
 
-  return mapRpcProfileJson(asRpcObj(row.profile));
+  const candidate = mapRpcProfileJson(asRpcObj(row.profile));
+  if (row.need_password_setup) {
+    candidate.must_set_password = true;
+  }
+  return candidate;
+}
+
+export type CandidateLoginResult =
+  | { ok: true; candidate: Candidate; needPasswordSetup?: boolean }
+  | { ok: false; error: string; needPasswordSetup?: boolean };
+
+export async function loginCandidateWithPassword(
+  profileId: string,
+  password: string
+): Promise<CandidateLoginResult> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("login_candidate", {
+    p_profile_id: profileId.trim(),
+    p_password: password,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  const row = asRpcObj(data);
+  if (!row.ok) {
+    return {
+      ok: false,
+      error: String(row.error ?? "เข้าสู่ระบบไม่สำเร็จ"),
+      needPasswordSetup: Boolean(row.need_password_setup),
+    };
+  }
+  return { ok: true, candidate: mapRpcProfileJson(asRpcObj(row.profile)) };
+}
+
+export async function verifyCandidateForPassword(profileId: string, phone: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("verify_candidate_for_password", {
+    p_profile_id: profileId.trim(),
+    p_phone: phone.trim(),
+  });
+  if (error) return { ok: false as const, error: error.message };
+  const row = asRpcObj(data);
+  if (!row.ok) {
+    return {
+      ok: false as const,
+      error: String(row.error ?? "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้งหรือติดต่อผู้ดูแลระบบ"),
+    };
+  }
+  return {
+    ok: true as const,
+    profile_id: String(row.profile_id),
+    must_set_password: Boolean(row.must_set_password),
+    has_password: Boolean(row.has_password),
+  };
+}
+
+export async function setCandidatePassword(profileId: string, phone: string, newPassword: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("set_candidate_password", {
+    p_profile_id: profileId.trim(),
+    p_phone: phone.trim(),
+    p_new_password: newPassword,
+  });
+  if (error) return { ok: false as const, error: error.message };
+  const row = asRpcObj(data);
+  if (!row.ok) {
+    return {
+      ok: false as const,
+      error: String(row.error ?? "ตั้งรหัสผ่านไม่สำเร็จ"),
+    };
+  }
+  return { ok: true as const, candidate: mapRpcProfileJson(asRpcObj(row.profile)) };
+}
+
+export async function getSchoolProfileForAdmin(profileId: string, phone: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("get_school_profile_for_admin", {
+    p_profile_id: profileId,
+    p_phone: phone,
+  });
+  if (error) throw new Error(error.message);
+  const row = asRpcObj(data);
+  if (!row.ok) throw new Error(String(row.error ?? "โหลดข้อมูลโรงเรียนไม่สำเร็จ"));
+  return asRpcObj(row.school);
+}
+
+export async function updateSchoolProfileRpc(
+  profileId: string,
+  phone: string,
+  directorName: string,
+  directorPosition: string
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("update_school_profile", {
+    p_profile_id: profileId,
+    p_phone: phone,
+    p_director_name: directorName,
+    p_director_position: directorPosition,
+  });
+  if (error) return { ok: false as const, error: error.message };
+  const row = asRpcObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกไม่สำเร็จ") };
+  return { ok: true as const, school: asRpcObj(row.school) };
+}
+
+/** @deprecated Prefer loginCandidateWithPassword for portal access */
+export async function findProfileForLoginLegacyPhone(
+  profileId: string,
+  phone: string
+): Promise<Candidate | null> {
+  return findProfileForLogin(profileId, phone);
 }
 
 export async function upsertWatchProgressToDb(input: {

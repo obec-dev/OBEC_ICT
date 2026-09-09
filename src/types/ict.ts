@@ -7,6 +7,11 @@ export type School = {
   district_id?: string;
   /** Number of registered candidates (profiles) at this school */
   registered_count?: number;
+  school_director_name?: string | null;
+  school_director_position?: string | null;
+  updated_by_national_id?: string | null;
+  updated_by_name?: string | null;
+  school_profile_updated_at?: string | null;
 };
 
 /** Aggregated per-district stats for dashboard (no full school list) */
@@ -48,7 +53,24 @@ export type Candidate = {
   duty?: string;
   line_id?: string;
   email?: string;
+  /** Designated school data manager (one per school) */
+  is_school_admin?: boolean;
+  /** Must complete password setup before portal access */
+  must_set_password?: boolean;
+  ict_talent_cohort?: string;
+  ict_survey?: Record<string, unknown>;
   created_at: string;
+};
+
+export type SchoolProfile = {
+  school_id: string;
+  school_name: string;
+  province?: string;
+  school_director_name?: string | null;
+  school_director_position?: string | null;
+  updated_by_national_id?: string | null;
+  updated_by_name?: string | null;
+  school_profile_updated_at?: string | null;
 };
 
 export type WatchProgress = {
@@ -86,6 +108,8 @@ export type ExamQuestion = {
   image_url?: string | null;
   points?: number;
   order_index?: number;
+  /** When true, candidate must answer before exam submit */
+  answer_required?: boolean;
 };
 
 /** Sanitized version for candidates during exams to prevent anti-cheating inspection */

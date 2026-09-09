@@ -94,7 +94,7 @@ export async function fetchPublicExamQuestions(projectId?: string): Promise<Publ
     const supabase = createClient();
     let query = supabase
       .from("public_project_questions")
-      .select("id, project_id, prompt, type, options, image_url, points, order_index")
+      .select("id, project_id, prompt, type, options, image_url, points, order_index, answer_required")
       .order("order_index", { ascending: true });
     if (projectId) {
       query = query.eq("project_id", projectId);
@@ -230,6 +230,7 @@ export async function upsertProjectQuestion(token: string, question: ProjectQues
       image_url: question.image_url || null,
       points: question.points ?? 1,
       order_index: question.order_index ?? 0,
+      answer_required: question.answer_required !== false,
     },
   });
   if (error) {

@@ -12,8 +12,7 @@ export function SessionMenu() {
 
   const label = session.kind === "admin" ? session.admin.full_name : session.candidate.full_name;
   const initials = label.slice(0, 1);
-  const profileHref = session.kind === "admin" ? "/admin/change-password" : "/portal/profile";
-  const profileLabel = session.kind === "admin" ? "เปลี่ยนรหัสผ่าน" : "จัดการโปรไฟล์";
+  const isSchoolAdmin = session.kind === "candidate" && Boolean(session.candidate.is_school_admin);
   const roleLabel = session.kind === "admin" ? session.admin.role : null;
 
   return (
@@ -32,18 +31,39 @@ export function SessionMenu() {
         </span>
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 rounded-xl shadow-lg py-1 border border-gray-100 dark:border-slate-700 z-50 animate-scale-up">
-          <Link
-            href={profileHref}
-            className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
-            onClick={() => setOpen(false)}
-          >
-            {profileLabel}
-          </Link>
+        <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 rounded-xl shadow-lg py-1 border border-gray-100 dark:border-slate-700 z-50 animate-scale-up">
+          {session.kind === "admin" ? (
+            <Link
+              href="/admin/change-password"
+              className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
+              onClick={() => setOpen(false)}
+            >
+              เปลี่ยนรหัสผ่าน
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/portal/profile?tab=personal"
+                className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
+                onClick={() => setOpen(false)}
+              >
+                ตั้งค่าโปรไฟล์ส่วนตัว
+              </Link>
+              {isSchoolAdmin && (
+                <Link
+                  href="/portal/profile?tab=school"
+                  className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
+                  onClick={() => setOpen(false)}
+                >
+                  ตั้งค่าโปรไฟล์สถานศึกษา
+                </Link>
+              )}
+            </>
+          )}
           {session.kind === "admin" && (
             <Link
               href="/admin"
-              className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
+              className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
               onClick={() => setOpen(false)}
             >
               หน้าผู้ดูแล

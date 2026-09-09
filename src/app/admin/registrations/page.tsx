@@ -8,6 +8,7 @@ import {
   adminDeleteProfileRpc,
   adminDeleteSchoolProfilesRpc,
   adminListProfilesBySchool,
+  adminSetSchoolAdminRpc,
 } from "@/lib/supabase/admin";
 import { searchSchoolsByName } from "@/lib/supabase/data";
 import { disabledInputClass, inputClass } from "@/lib/styles";
@@ -24,6 +25,7 @@ function RegistrationsContent() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [roleUpdatingId, setRoleUpdatingId] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -146,6 +148,32 @@ function RegistrationsContent() {
     void refreshData();
   };
 
+  const setSchoolAdminRole = async (profileId: string, isSchoolAdmin: boolean) => {
+    if (!adminToken || !school) return;
+    setError("");
+    setMessage("");
+    setRoleUpdatingId(profileId);
+    const result = await adminSetSchoolAdminRpc(adminToken, profileId, isSchoolAdmin);
+    if (!result.ok) {
+      setError(result.error);
+      setRoleUpdatingId(null);
+      return;
+    }
+    try {
+      const rows = await adminListProfilesBySchool(adminToken, school.school_id);
+      setProfiles(rows);
+      setMessage(
+        isSchoolAdmin
+          ? "ตั้งเป็นผู้จัดการข้อมูลสถานศึกษาแล้ว"
+          : "ยกเลิกสิทธิ์ผู้จัดการข้อมูลสถานศึกษาแล้ว"
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "โหลดรายการไม่สำเร็จหลังเปลี่ยนบทบาท");
+    } finally {
+      setRoleUpdatingId(null);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-12 animate-fade-in-up">
       <AdminNav />
@@ -240,6 +268,7 @@ function RegistrationsContent() {
                   <th className="text-left px-4 py-3">เลขบัตร</th>
                   <th className="text-left px-4 py-3">ชื่อ-นามสกุล</th>
                   <th className="text-left px-4 py-3">โทร</th>
+                  <th className="text-left px-4 py-3">บทบาท</th>
                   <th className="text-left px-4 py-3">จัดการ</th>
                 </tr>
               </thead>
@@ -249,6 +278,19 @@ function RegistrationsContent() {
                     <td className="px-4 py-3 font-mono text-xs">{p.id}</td>
                     <td className="px-4 py-3">{p.full_name}</td>
                     <td className="px-4 py-3">{p.phone}</td>
+                    <td className="px-4 py-3">
+                      <select
+                        className={`${inputClass} py-2 text-xs min-w-[9rem]`}
+                        value={p.is_school_admin ? "school_admin" : "user"}
+                        disabled={roleUpdatingId === p.id}
+                        onChange={(e) =>
+                          void setSchoolAdminRole(p.id, e.target.value === "school_admin")
+                        }
+                      >
+                        <option value="user">user</option>
+                        <option value="school_admin">school_admin</option>
+                      </select>
+                    </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <button
                         type="button"
@@ -262,7 +304,7 @@ function RegistrationsContent() {
                 ))}
                 {profiles.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
                       ยังไม่มีผู้สมัครในโรงเรียนนี้
                     </td>
                   </tr>

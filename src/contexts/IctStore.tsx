@@ -19,8 +19,9 @@ import {
   fetchDistrictStats,
   fetchSchoolById,
   fetchSchoolTotals,
-  findProfileForLogin,
   insertProfile,
+  loginCandidateWithPassword,
+  setCandidatePassword,
   updateOwnProfile,
   upsertExamProgressToDb,
   upsertWatchProgressToDb,
@@ -95,6 +96,9 @@ type RegisterInput = {
   duty: string;
   line_id: string;
   email: string;
+  is_school_admin?: boolean;
+  ict_talent_cohort?: string;
+  ict_survey?: Record<string, unknown>;
   /** Subject whose reg checkbox/window must be open */
   project_id?: string;
 };
@@ -138,8 +142,15 @@ type IctStoreValue = {
     input: RegisterInput
   ) => Promise<{ ok: true; candidate: Candidate } | { ok: false; error: string }>;
   login: (
-    profileIdOrAdmin: string,
-    phoneOrPassword: string
+    profileId: string,
+    password: string
+  ) => Promise<
+    { ok: true } | { ok: false; error: string; needPasswordSetup?: boolean }
+  >;
+  completePasswordSetup: (
+    profileId: string,
+    phone: string,
+    newPassword: string
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
   loginAdmin: (
     username: string,
@@ -567,6 +578,9 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           duty: input.duty,
           line_id: input.line_id,
           email: input.email,
+          is_school_admin: input.is_school_admin,
+          ict_talent_cohort: input.ict_talent_cohort,
+          ict_survey: input.ict_survey,
         });
 
         setCandidates((prev) => [candidate, ...prev.filter((c) => c.id !== candidate.id)]);
@@ -596,43 +610,45 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const login = useCallback(
-    async (profileIdOrAdmin: string, phoneOrPassword: string) => {
+    async (profileId: string, password: string) => {
       try {
-        const rawId = profileIdOrAdmin.trim();
-        const rawPhone = phoneOrPassword.trim();
-        const candidate = await findProfileForLogin(rawId, rawPhone);
-
-        if (!candidate) return { ok: false as const, error: "เลขบัตรประชาชนหรือเบอร์โทรศัพท์ไม่ถูกต้อง" };
-        persistSession({ kind: "candidate", candidate });
-        setCandidates([candidate]);
+        const result = await loginCandidateWithPassword(profileId.trim(), password);
+        if (!result.ok) {
+          return {
+            ok: false as const,
+            error: result.error,
+            needPasswordSetup: result.needPasswordSetup,
+          };
+        }
+        if (result.candidate.must_set_password) {
+          return {
+            ok: false as const,
+            error: "กรุณาตั้งรหัสผ่านครั้งแรกก่อนเข้าใช้งาน",
+            needPasswordSetup: true,
+          };
+        }
+        persistSession({ kind: "candidate", candidate: result.candidate });
+        setCandidates([result.candidate]);
         return { ok: true as const };
       } catch (err) {
-        const rawId = profileIdOrAdmin.trim();
-        const rawPhone = phoneOrPassword.trim();
-        const digitsId = rawId.replace(/\D/g, "");
-        const digitsPhone = rawPhone.replace(/\D/g, "");
-        const matchLocal = candidates.find((c) => {
-          const candIdDigits = c.id.replace(/\D/g, "");
-          const candPhoneDigits = (c.phone || "").replace(/\D/g, "");
-          const idMatch = c.id === rawId || (digitsId && candIdDigits === digitsId);
-          const phoneMatch =
-            (c.phone || "").trim() === rawPhone ||
-            (digitsPhone && candPhoneDigits === digitsPhone) ||
-            (c.phone || "").trim() === digitsPhone;
-          return idMatch && phoneMatch;
-        });
-        if (matchLocal) {
-          persistSession({ kind: "candidate", candidate: matchLocal });
-          setCandidates([matchLocal]);
-          return { ok: true as const };
-        }
         return {
           ok: false as const,
           error: err instanceof Error ? err.message : "เข้าสู่ระบบไม่สำเร็จ",
         };
       }
     },
-    [candidates, persistSession]
+    [persistSession]
+  );
+
+  const completePasswordSetup = useCallback(
+    async (profileId: string, phone: string, newPassword: string) => {
+      const result = await setCandidatePassword(profileId, phone, newPassword);
+      if (!result.ok) return result;
+      persistSession({ kind: "candidate", candidate: result.candidate });
+      setCandidates([result.candidate]);
+      return { ok: true as const };
+    },
+    [persistSession]
   );
 
   const loginAdmin = useCallback(
@@ -995,6 +1011,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       lookupSchool,
       registerCandidate,
       login,
+      completePasswordSetup,
       loginAdmin,
       refreshAdminSession,
       logout,
@@ -1032,6 +1049,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       loadError,
       loading,
       login,
+      completePasswordSetup,
       loginAdmin,
       logout,
       lookupSchool,

@@ -16,9 +16,15 @@ Docs
 Apply latest SQL (if not yet)
   harden_security_v1.sql   — REQUIRED before this app build (RLS + secure RPCs)
   fix_candidate_login.sql  — REQUIRED if candidates cannot login after harden
+  fix_register_birth_date.sql — REQUIRED if register fails on birth_date type
+  fix_projects_pass_threshold_columns.sql — REQUIRED if admin project save fails (pass_threshold_mode)
   fix_pass_threshold_mode.sql
   fix_results_visibility_and_grading.sql
   fix_admin_session_slide.sql
+  fix_exam_status_enum_cast.sql — REQUIRED if exam submit fails (status enum)
+  fix_question_answer_required.sql — REQUIRED for mandatory answer flag on questions
+  fix_schools_by_district_counts.sql — REQUIRED for district expand school list people counts (N)
+  refactor_auth_school_admin_survey_v1.sql — REQUIRED for password login, school admin, ICT survey
 
 After harden_security_v1.sql
   Admin passwords must be bcrypt. If login fails, reset in SQL Editor:
