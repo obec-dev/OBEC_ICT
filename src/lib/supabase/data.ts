@@ -35,9 +35,6 @@ type ProfileRow = {
   schools?: { school_name: string } | { school_name: string }[] | null;
 };
 
-const PROFILE_SELECT =
-  "profile_id, school_id, first_name, last_name, phone, remark, title_key, title_en, title_th, title_other_en, title_other_th, eng_first_name, eng_last_name, birth_date, gender, position, duty, line_id, email, created_at, schools(school_name)";
-
 function districtName(row: SchoolRow): string {
   const d = row.districts;
   if (!d) return row.district_id;
@@ -122,41 +119,8 @@ export async function fetchDistrictStats(): Promise<DistrictStat[]> {
     })
   );
 
-  // Fallback: if trigger didn't set is_registered, still count schools that have profiles
-  const registeredByDistrict = await countRegisteredSchoolsByDistrict();
-  return stats.map((d) => ({
-    ...d,
-    registered_schools: Math.max(d.registered_schools, registeredByDistrict.get(d.district_id) ?? 0),
-  }));
-}
-
-async function countRegisteredSchoolsByDistrict(): Promise<Map<string, number>> {
-  const supabase = createClient();
-  const { data: profiles, error } = await supabase.from("profiles").select("school_id");
-  if (error || !profiles?.length) return new Map();
-
-  const schoolIds = [...new Set(profiles.map((p) => p.school_id).filter(Boolean))];
-  if (!schoolIds.length) return new Map();
-
-  const { data: schools, error: schoolError } = await supabase
-    .from("schools")
-    .select("school_id, district_id")
-    .in("school_id", schoolIds);
-
-  if (schoolError || !schools?.length) return new Map();
-
-  const byDistrict = new Map<string, Set<string>>();
-  for (const school of schools) {
-    const set = byDistrict.get(school.district_id) ?? new Set<string>();
-    set.add(school.school_id);
-    byDistrict.set(school.district_id, set);
-  }
-
-  const counts = new Map<string, number>();
-  for (const [districtId, set] of byDistrict) {
-    counts.set(districtId, set.size);
-  }
-  return counts;
+  // Rely on get_district_stats only (no public profiles scan — PII leak)
+  return stats;
 }
 
 /** 1 tiny row — home page counters */
@@ -166,18 +130,10 @@ export async function fetchSchoolTotals(): Promise<SchoolTotals> {
   if (error) throw new Error(error.message);
 
   const row = Array.isArray(data) ? data[0] : data;
-  const totals: SchoolTotals = {
+  return {
     total: Number(row?.total_schools) || 0,
     registered: Number(row?.registered_schools) || 0,
     zones: Number(row?.total_districts) || 0,
-  };
-
-  const { data: profileRows } = await supabase.from("profiles").select("school_id");
-  const uniqueRegistered = new Set((profileRows ?? []).map((p) => p.school_id)).size;
-
-  return {
-    ...totals,
-    registered: Math.max(totals.registered, uniqueRegistered),
   };
 }
 
@@ -186,9 +142,7 @@ export async function fetchSchoolsByDistrict(districtId: string): Promise<School
   const supabase = createClient();
   const { data, error } = await supabase
     .from("schools")
-    .select(
-      "school_id, school_name, province, is_registered, district_id, districts(district_name), profiles(profile_id)"
-    )
+    .select("school_id, school_name, province, is_registered, district_id, districts(district_name)")
     .eq("district_id", districtId)
     .order("school_name");
 
@@ -212,7 +166,7 @@ export async function fetchSchoolById(schoolId: string): Promise<School | null> 
 
 /** Search schools by name or school_id (lightweight, limited) */
 export async function searchSchoolsByName(query: string, limit = 50): Promise<School[]> {
-  const q = query.trim();
+  const q = query.trim().replace(/[%_,]/g, " ").replace(/\s+/g, " ").trim();
   if (!q) return [];
 
   const supabase = createClient();
@@ -227,15 +181,35 @@ export async function searchSchoolsByName(query: string, limit = 50): Promise<Sc
   return ((data as SchoolRow[] | null) ?? []).map(mapSchoolRow);
 }
 
+/** @deprecated Public profile dumps are blocked by RLS. Use admin RPCs. */
 export async function fetchAllProfiles(): Promise<Candidate[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from("profiles")
-    .select(PROFILE_SELECT)
-    .order("created_at", { ascending: false });
+  return [];
+}
 
-  if (error) throw new Error(error.message);
-  return (data as ProfileRow[] | null)?.map(mapProfileRow) ?? [];
+function mapRpcProfileJson(raw: Record<string, unknown>): Candidate {
+  return mapProfileRow({
+    profile_id: String(raw.profile_id ?? ""),
+    school_id: String(raw.school_id ?? ""),
+    first_name: String(raw.first_name ?? ""),
+    last_name: String(raw.last_name ?? ""),
+    phone: String(raw.phone ?? ""),
+    remark: raw.remark == null ? null : String(raw.remark),
+    title_key: raw.title_key == null ? null : String(raw.title_key),
+    title_en: raw.title_en == null ? null : String(raw.title_en),
+    title_th: raw.title_th == null ? null : String(raw.title_th),
+    title_other_en: raw.title_other_en == null ? null : String(raw.title_other_en),
+    title_other_th: raw.title_other_th == null ? null : String(raw.title_other_th),
+    eng_first_name: raw.eng_first_name == null ? null : String(raw.eng_first_name),
+    eng_last_name: raw.eng_last_name == null ? null : String(raw.eng_last_name),
+    birth_date: raw.birth_date == null ? null : String(raw.birth_date),
+    gender: raw.gender == null ? null : String(raw.gender),
+    position: raw.position == null ? null : String(raw.position),
+    duty: raw.duty == null ? null : String(raw.duty),
+    line_id: raw.line_id == null ? null : String(raw.line_id),
+    email: raw.email == null ? null : String(raw.email),
+    created_at: raw.created_at == null ? null : String(raw.created_at),
+    schools: raw.school_name ? { school_name: String(raw.school_name) } : null,
+  });
 }
 
 export type RegisterProfileInput = {
@@ -263,11 +237,12 @@ export type RegisterProfileInput = {
   email: string;
 };
 
-type ExistingProfileCheck = {
-  profile_id: string;
-  school_id: string;
-  schools: { school_name: string } | { school_name: string }[] | null;
-};
+function asRpcObj(data: unknown): Record<string, unknown> {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    return data as Record<string, unknown>;
+  }
+  return {};
+}
 
 export async function findProfileById(profileId: string): Promise<{
   profile_id: string;
@@ -275,275 +250,185 @@ export async function findProfileById(profileId: string): Promise<{
   school_name?: string;
 } | null> {
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("profile_id, school_id, schools(school_name)")
-    .eq("profile_id", profileId.trim())
-    .maybeSingle();
-
+  const { data, error } = await supabase.rpc("profile_registration_check", {
+    p_profile_id: profileId.trim(),
+  });
   if (error) throw new Error(error.message);
-  if (!data) return null;
 
-  const row = data as ExistingProfileCheck;
-  const school = row.schools;
-  const school_name = Array.isArray(school) ? school[0]?.school_name : school?.school_name;
+  const row = asRpcObj(data);
+  if (!row.exists) return null;
+
   return {
-    profile_id: row.profile_id,
-    school_id: row.school_id,
-    school_name,
+    profile_id: String(row.profile_id ?? ""),
+    school_id: String(row.school_id ?? ""),
+    school_name: row.school_name ? String(row.school_name) : undefined,
   };
-}
-
-async function markSchoolRegistered(schoolId: string) {
-  const supabase = createClient();
-  const { error } = await supabase.rpc("mark_school_registered", { p_school_id: schoolId });
-  if (error) {
-    // Fallback: ignore if RPC not deployed yet; trigger/backfill SQL should cover it
-    console.warn("mark_school_registered:", error.message);
-  }
 }
 
 export async function insertProfile(input: RegisterProfileInput): Promise<Candidate> {
   const supabase = createClient();
-  const profileId = input.profile_id.trim();
-  const schoolId = input.school_id;
+  const { data, error } = await supabase.rpc("register_profile", {
+    p_profile_id: input.profile_id.trim(),
+    p_school_id: input.school_id,
+    p_first_name: input.first_name.trim(),
+    p_last_name: input.last_name.trim(),
+    p_phone: input.phone.trim(),
+    p_remark: input.remark?.trim() || null,
+    p_pdpa_accepted: input.pdpa_accepted ?? true,
+    p_title_key: input.title_key,
+    p_title_en: input.title_en.trim() || null,
+    p_title_th: input.title_th.trim() || null,
+    p_title_other_en: input.title_other_en?.trim() || null,
+    p_title_other_th: input.title_other_th?.trim() || null,
+    p_eng_first_name: input.eng_first_name.trim(),
+    p_eng_last_name: input.eng_last_name.trim(),
+    p_birth_date: input.birth_date,
+    p_gender: input.gender,
+    p_position: input.position.trim(),
+    p_duty: input.duty.trim(),
+    p_line_id: input.line_id.trim(),
+    p_email: input.email.trim().toLowerCase(),
+  });
+  if (error) throw new Error(error.message);
 
-  const existing = await findProfileById(profileId);
-  if (existing) {
-    if (existing.school_id === schoolId) {
-      throw new Error(
-        `เลขบัตรประชาชนนี้ลงทะเบียนกับโรงเรียนนี้แล้ว${existing.school_name ? ` (${existing.school_name})` : ""}`
-      );
-    }
-    throw new Error(
-      `เลขบัตรประชาชนนี้ถูกใช้ลงทะเบียนกับโรงเรียนอื่นแล้ว${
-        existing.school_name ? ` (${existing.school_name})` : ` (รหัส ${existing.school_id})`
-      }`
-    );
+  const row = asRpcObj(data);
+  if (!row.ok) {
+    throw new Error(String(row.error ?? "ลงทะเบียนไม่สำเร็จ"));
   }
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .insert({
-      profile_id: profileId,
-      school_id: schoolId,
-      first_name: input.first_name.trim(),
-      last_name: input.last_name.trim(),
-      phone: input.phone.trim(),
-      remark: input.remark?.trim() || null,
-      pdpa_accepted: input.pdpa_accepted ?? true,
-      title_key: input.title_key,
-      title_en: input.title_en.trim() || null,
-      title_th: input.title_th.trim() || null,
-      title_other_en: input.title_other_en?.trim() || null,
-      title_other_th: input.title_other_th?.trim() || null,
-      eng_first_name: input.eng_first_name.trim(),
-      eng_last_name: input.eng_last_name.trim(),
-      birth_date: input.birth_date,
-      gender: input.gender,
-      position: input.position.trim(),
-      duty: input.duty.trim(),
-      line_id: input.line_id.trim(),
-      email: input.email.trim().toLowerCase(),
-    })
-    .select(PROFILE_SELECT)
-    .single();
-
-  if (error) {
-    if (error.code === "23505") {
-      throw new Error("เลขบัตรประชาชนนี้ลงทะเบียนแล้ว");
-    }
-    if (error.code === "23503") {
-      throw new Error("ไม่พบรหัสโรงเรียนนี้ในระบบ");
-    }
-    throw new Error(error.message);
-  }
-
-  await markSchoolRegistered(schoolId);
-  return mapProfileRow(data as ProfileRow);
+  const profile = asRpcObj(row.profile);
+  return mapRpcProfileJson(profile);
 }
 
-export async function updateProfile(
-  profileId: string,
-  patch: Partial<
-    Pick<
-      Candidate,
-      | "first_name"
-      | "last_name"
-      | "phone"
-      | "remark"
-      | "title_key"
-      | "title_en"
-      | "title_th"
-      | "title_other_en"
-      | "title_other_th"
-      | "eng_first_name"
-      | "eng_last_name"
-      | "position"
-      | "duty"
-      | "line_id"
-      | "email"
-    >
+export type OwnProfilePatch = Partial<
+  Pick<
+    Candidate,
+    | "first_name"
+    | "last_name"
+    | "phone"
+    | "remark"
+    | "title_key"
+    | "title_en"
+    | "title_th"
+    | "title_other_en"
+    | "title_other_th"
+    | "eng_first_name"
+    | "eng_last_name"
+    | "position"
+    | "duty"
+    | "line_id"
+    | "email"
   >
-): Promise<void> {
+>;
+
+export async function updateOwnProfile(
+  profileId: string,
+  phone: string,
+  patch: OwnProfilePatch
+): Promise<Candidate> {
   const supabase = createClient();
-  const payload: Record<string, string | null> = {
-    updated_at: new Date().toISOString(),
-  };
-
-  const trimOrNull = (v: string): string | null => v.trim() || null;
-
-  if (patch.first_name !== undefined) payload.first_name = patch.first_name.trim();
-  if (patch.last_name !== undefined) payload.last_name = patch.last_name.trim();
-  if (patch.phone !== undefined) payload.phone = patch.phone.trim();
-  if (patch.remark !== undefined) payload.remark = patch.remark.trim() || null;
-  if (patch.title_key !== undefined) payload.title_key = trimOrNull(patch.title_key);
-  if (patch.title_en !== undefined) payload.title_en = trimOrNull(patch.title_en);
-  if (patch.title_th !== undefined) payload.title_th = trimOrNull(patch.title_th);
-  if (patch.title_other_en !== undefined) payload.title_other_en = trimOrNull(patch.title_other_en);
-  if (patch.title_other_th !== undefined) payload.title_other_th = trimOrNull(patch.title_other_th);
-  if (patch.eng_first_name !== undefined) payload.eng_first_name = trimOrNull(patch.eng_first_name);
-  if (patch.eng_last_name !== undefined) payload.eng_last_name = trimOrNull(patch.eng_last_name);
-  if (patch.position !== undefined) payload.position = trimOrNull(patch.position);
-  if (patch.duty !== undefined) payload.duty = trimOrNull(patch.duty);
-  if (patch.line_id !== undefined) payload.line_id = trimOrNull(patch.line_id);
-  if (patch.email !== undefined) payload.email = trimOrNull(patch.email);
-
-  const { error } = await supabase.from("profiles").update(payload).eq("profile_id", profileId);
+  const { data, error } = await supabase.rpc("update_own_profile", {
+    p_profile_id: profileId,
+    p_phone: phone,
+    p_patch: patch,
+  });
   if (error) throw new Error(error.message);
+
+  const row = asRpcObj(data);
+  if (!row.ok) {
+    throw new Error(String(row.error ?? "อัปเดตไม่สำเร็จ"));
+  }
+  return mapRpcProfileJson(asRpcObj(row.profile));
 }
 
-export async function deleteProfile(profileId: string): Promise<void> {
-  const supabase = createClient();
-  const { error } = await supabase.from("profiles").delete().eq("profile_id", profileId);
-  if (error) throw new Error(error.message);
+/** @deprecated Direct profile updates are blocked. Use updateOwnProfile or admin RPCs. */
+export async function updateProfile(
+  _profileId: string,
+  _patch: OwnProfilePatch
+): Promise<void> {
+  throw new Error("updateProfile is deprecated; use updateOwnProfile or admin RPCs");
+}
+
+/** @deprecated Direct profile deletes are blocked. Use adminDeleteProfileRpc. */
+export async function deleteProfile(_profileId: string): Promise<void> {
+  throw new Error("deleteProfile is deprecated; use adminDeleteProfileRpc");
 }
 
 export async function findProfileForLogin(profileId: string, phone: string): Promise<Candidate | null> {
   const supabase = createClient();
-  const rawId = profileId.trim();
-  const rawPhone = phone.trim();
-  const digitsId = rawId.replace(/\D/g, "");
-  const digitsPhone = rawPhone.replace(/\D/g, "");
-
-  // 1. Try exact query first
-  const { data: exactData, error: exactError } = await supabase
-    .from("profiles")
-    .select(PROFILE_SELECT)
-    .eq("profile_id", rawId)
-    .eq("phone", rawPhone)
-    .maybeSingle();
-
-  if (!exactError && exactData) {
-    return mapProfileRow(exactData as ProfileRow);
+  const { data, error } = await supabase.rpc("login_profile", {
+    p_profile_id: profileId.trim(),
+    p_phone: phone.trim(),
+  });
+  if (error) {
+    // Surface PostgREST/RPC errors (missing function, grants, etc.)
+    throw new Error(error.message);
   }
 
-  // 2. Query by profile_id (rawId or digitsId) and verify phone
-  const searchIds = [...new Set([rawId, digitsId].filter(Boolean))];
-  const { data: candidatesData, error: searchError } = await supabase
-    .from("profiles")
-    .select(PROFILE_SELECT)
-    .in("profile_id", searchIds);
-
-  if (!searchError && candidatesData && candidatesData.length > 0) {
-    for (const row of candidatesData) {
-      const dbPhone = (row.phone || "").trim();
-      const dbDigitsPhone = dbPhone.replace(/\D/g, "");
-      if (
-        dbPhone === rawPhone ||
-        (digitsPhone && dbDigitsPhone === digitsPhone) ||
-        dbPhone === digitsPhone ||
-        dbDigitsPhone === rawPhone
-      ) {
-        return mapProfileRow(row as ProfileRow);
-      }
+  const row = asRpcObj(data);
+  if (!row.ok) {
+    const msg = String(row.error ?? "");
+    if (msg && !/เลขบัตร|ไม่ถูกต้อง|invalid/i.test(msg)) {
+      throw new Error(msg);
     }
-    // If only 1 profile matched the 13-digit ID card number, allow login as fallback
-    if (candidatesData.length === 1 && digitsId.length === 13) {
-      return mapProfileRow(candidatesData[0] as ProfileRow);
-    }
+    return null;
   }
 
-  return null;
+  return mapRpcProfileJson(asRpcObj(row.profile));
 }
 
 export async function upsertWatchProgressToDb(input: {
   profile_id: string;
+  phone: string;
   video_id: string;
   watched_seconds: number;
   duration_seconds: number;
   completed: boolean;
 }) {
   const supabase = createClient();
-  const { error } = await supabase.from("watch_progress").upsert(
-    {
-      profile_id: input.profile_id,
-      video_id: input.video_id,
-      watched_seconds: Math.floor(input.watched_seconds),
-      duration_seconds: Math.floor(input.duration_seconds),
-      completed: input.completed,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "profile_id" }
-  );
+  const { data, error } = await supabase.rpc("upsert_watch_progress", {
+    p_profile_id: input.profile_id,
+    p_phone: input.phone,
+    p_video_id: input.video_id,
+    p_watched_seconds: Math.floor(input.watched_seconds),
+    p_duration_seconds: Math.floor(input.duration_seconds),
+    p_completed: input.completed,
+  });
   if (error) throw new Error(error.message);
+
+  const row = asRpcObj(data);
+  if (!row.ok) throw new Error(String(row.error ?? "บันทึกความคืบหน้าไม่สำเร็จ"));
 }
 
 export async function upsertExamProgressToDb(input: {
   profile_id: string;
-  project_id?: string;
+  phone: string;
+  project_id: string;
   answers: Record<string, string>;
   status: "draft" | "submitted";
 }) {
+  if (!input.project_id?.trim()) {
+    throw new Error("ไม่พบโครงการ");
+  }
   const supabase = createClient();
-  const payload: Record<string, unknown> = {
-    profile_id: input.profile_id,
-    answers: input.answers,
-    status: input.status,
-    updated_at: new Date().toISOString(),
-  };
-  if (input.project_id) {
-    payload.project_id = input.project_id;
-  }
-  if (input.status === "submitted") {
-    payload.submitted_at = new Date().toISOString();
-  }
-
-  // Prefer per-project uniqueness; fall back to legacy profile_id-only schema.
-  const conflictTarget = input.project_id ? "profile_id,project_id" : "profile_id";
-  let { error } = await supabase.from("exam_progress").upsert(payload, { onConflict: conflictTarget });
-
-  if (error && input.project_id && /conflict|constraint|unique/i.test(error.message)) {
-    ({ error } = await supabase.from("exam_progress").upsert(payload, { onConflict: "profile_id" }));
-  }
-
+  const { data, error } = await supabase.rpc("upsert_exam_progress", {
+    p_profile_id: input.profile_id,
+    p_phone: input.phone,
+    p_project_id: input.project_id,
+    p_answers: input.answers,
+    p_status: input.status,
+  });
   if (error) throw new Error(error.message);
+
+  const row = asRpcObj(data);
+  if (!row.ok) throw new Error(String(row.error ?? "บันทึกข้อสอบไม่สำเร็จ"));
 }
 
+/** @deprecated Public exam progress scans are blocked. Use adminListExamProgressRpc. */
 export async function fetchExamProgressByProfiles(
-  profileIds: string[],
-  projectId?: string
+  _profileIds: string[],
+  _projectId?: string
 ): Promise<ExamProgress[]> {
-  if (profileIds.length === 0) return [];
-  const supabase = createClient();
-  let query = supabase
-    .from("exam_progress")
-    .select("profile_id, project_id, answers, status, score, passed, graded_at, updated_at")
-    .in("profile_id", profileIds);
-  if (projectId) {
-    query = query.or(`project_id.eq.${projectId},project_id.is.null`);
-  }
-  const { data, error } = await query;
-  if (error || !data) return [];
-  return data.map((row) => ({
-    candidate_id: String(row.profile_id),
-    project_id: row.project_id ? String(row.project_id) : undefined,
-    answers: (row.answers as Record<string, string>) || {},
-    status: row.status === "submitted" ? ("submitted" as const) : ("draft" as const),
-    score: row.score != null ? Number(row.score) : undefined,
-    passed: typeof row.passed === "boolean" ? row.passed : undefined,
-    graded_at: row.graded_at ? String(row.graded_at) : undefined,
-    updated_at: row.updated_at ? String(row.updated_at) : new Date().toISOString(),
-  }));
+  return [];
 }
 

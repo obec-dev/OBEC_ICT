@@ -9,16 +9,19 @@ import {
   useState,
 } from "react";
 import { LEARNING_VIDEO_ID } from "@/data/schools";
-import { adminLogin as adminLoginRpc, adminLogout as adminLogoutRpc } from "@/lib/supabase/admin";
 import {
-  deleteProfile,
-  fetchAllProfiles,
+  adminDeleteProfileRpc,
+  adminLogin as adminLoginRpc,
+  adminLogout as adminLogoutRpc,
+  adminUpdateProfileRpc,
+} from "@/lib/supabase/admin";
+import {
   fetchDistrictStats,
   fetchSchoolById,
   fetchSchoolTotals,
   findProfileForLogin,
   insertProfile,
-  updateProfile,
+  updateOwnProfile,
   upsertExamProgressToDb,
   upsertWatchProgressToDb,
 } from "@/lib/supabase/data";
@@ -43,10 +46,11 @@ import type {
   WatchProgress,
 } from "@/types/ict";
 import {
+  adminFetchProjectQuestions,
   deleteProjectDb,
   deleteProjectQuestionDb,
   deleteProjectVideoDb,
-  fetchProjectQuestions,
+  fetchPublicExamQuestions,
   fetchProjects,
   fetchProjectVideos,
   upsertProject,
@@ -54,6 +58,22 @@ import {
   upsertProjectVideo,
 } from "@/lib/supabase/projects";
 import { MOCK_PROJECTS, MOCK_QUESTIONS, MOCK_VIDEOS } from "@/data/mockProjects";
+import { getSiteProject } from "@/lib/siteSettings";
+
+function stripQuestionKeys(questions: ProjectQuestion[]): ProjectQuestion[] {
+  return questions.map((q) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { correct_answer, model_answer, ...rest } = q;
+    return rest;
+  });
+}
+
+function requireAdminToken(session: SessionUser | null): string {
+  if (session?.kind !== "admin" || !session.token) {
+    throw new Error("ไม่ได้เข้าสู่ระบบผู้ดูแล");
+  }
+  return session.token;
+}
 
 type RegisterInput = {
   profile_id: string;
@@ -197,20 +217,40 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     setLoadError(null);
     try {
-      const [stats, totals, nextProfiles, dbProjects, dbVideos, dbQuestions] = await Promise.all([
+      const [stats, totals, dbProjects, dbVideos, publicQuestions] = await Promise.all([
         fetchDistrictStats(),
         fetchSchoolTotals(),
-        fetchAllProfiles(),
         fetchProjects(),
         fetchProjectVideos(),
-        fetchProjectQuestions(),
+        fetchPublicExamQuestions(),
       ]);
       setDistrictStats(stats);
       setSchoolTotals(totals);
-      setCandidates(nextProfiles);
+
+      const sess = readSession();
+      if (sess?.kind === "candidate") {
+        setCandidates([sess.candidate]);
+      } else {
+        setCandidates([]);
+      }
+
       if (dbProjects?.length) setProjects(dbProjects);
       if (dbVideos?.length) setVideos(dbVideos);
-      if (dbQuestions?.length) setQuestions(dbQuestions);
+
+      const siteId = getSiteProject(dbProjects?.length ? dbProjects : MOCK_PROJECTS)?.id;
+      const publicForSite = siteId
+        ? publicQuestions.filter((q) => !q.project_id || q.project_id === siteId)
+        : publicQuestions;
+      setQuestions(publicForSite as ProjectQuestion[]);
+
+      if (sess?.kind === "admin" && sess.token) {
+        try {
+          const adminQs = await adminFetchProjectQuestions(sess.token);
+          if (adminQs.length) setQuestions(adminQs);
+        } catch {
+          /* keep public questions if admin RPC fails */
+        }
+      }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "โหลดข้อมูลจากฐานข้อมูลไม่สำเร็จ");
     } finally {
@@ -225,7 +265,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       setExamProgress(persisted.examProgress ?? []);
       if (persisted.projects?.length) setProjects(persisted.projects);
       if (persisted.videos?.length) setVideos(persisted.videos);
-      if (persisted.questions?.length) setQuestions(persisted.questions);
+      if (persisted.questions?.length) setQuestions(stripQuestionKeys(persisted.questions));
     }
     setSession(readSession());
     setHydrated(true);
@@ -234,7 +274,13 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const state: IctPersistedState = { watchProgress, examProgress, projects, videos, questions };
+    const state: IctPersistedState = {
+      watchProgress,
+      examProgress,
+      projects,
+      videos,
+      questions: stripQuestionKeys(questions),
+    };
     writePersistedState(state);
   }, [hydrated, watchProgress, examProgress, projects, videos, questions]);
 
@@ -249,7 +295,8 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
 
   const saveProject = useCallback(async (project: LearningProject) => {
     try {
-      await upsertProject(project);
+      const token = requireAdminToken(session);
+      await upsertProject(token, project);
       setProjects((prev) => {
         const idx = prev.findIndex((p) => p.id === project.id);
         if (idx >= 0) {
@@ -263,11 +310,12 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : "บันทึกโครงการไม่สำเร็จ" };
     }
-  }, []);
+  }, [session]);
 
   const deleteProject = useCallback(async (id: string) => {
     try {
-      await deleteProjectDb(id);
+      const token = requireAdminToken(session);
+      await deleteProjectDb(token, id);
       setProjects((prev) => prev.filter((p) => p.id !== id));
       setVideos((prev) => prev.filter((v) => v.project_id !== id));
       setQuestions((prev) => prev.filter((q) => q.project_id !== id));
@@ -275,11 +323,12 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : "ลบโครงการไม่สำเร็จ" };
     }
-  }, []);
+  }, [session]);
 
   const saveProjectVideo = useCallback(async (video: ProjectVideo) => {
     try {
-      await upsertProjectVideo(video);
+      const token = requireAdminToken(session);
+      await upsertProjectVideo(token, video);
       setVideos((prev) => {
         const idx = prev.findIndex((v) => v.id === video.id);
         if (idx >= 0) {
@@ -293,21 +342,23 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : "บันทึกวิดีโอไม่สำเร็จ" };
     }
-  }, []);
+  }, [session]);
 
   const deleteProjectVideo = useCallback(async (id: string) => {
     try {
-      await deleteProjectVideoDb(id);
+      const token = requireAdminToken(session);
+      await deleteProjectVideoDb(token, id);
       setVideos((prev) => prev.filter((v) => v.id !== id));
       return { ok: true as const };
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : "ลบวิดีโอไม่สำเร็จ" };
     }
-  }, []);
+  }, [session]);
 
   const saveProjectQuestion = useCallback(async (question: ProjectQuestion) => {
     try {
-      await upsertProjectQuestion(question);
+      const token = requireAdminToken(session);
+      await upsertProjectQuestion(token, question);
       setQuestions((prev) => {
         const idx = prev.findIndex((q) => q.id === question.id);
         if (idx >= 0) {
@@ -321,21 +372,23 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : "บันทึกข้อสอบไม่สำเร็จ" };
     }
-  }, []);
+  }, [session]);
 
   const deleteProjectQuestion = useCallback(async (id: string) => {
     try {
-      await deleteProjectQuestionDb(id);
+      const token = requireAdminToken(session);
+      await deleteProjectQuestionDb(token, id);
       setQuestions((prev) => prev.filter((q) => q.id !== id));
       return { ok: true as const };
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : "ลบข้อสอบไม่สำเร็จ" };
     }
-  }, []);
+  }, [session]);
 
   const bulkSaveAnswerKeys = useCallback(
     async (projectId: string, keys: { questionIdOrOrder: string; correctAnswer: string }[]) => {
       try {
+        const token = requireAdminToken(session);
         const projQuestions = questions.filter((q) => q.project_id === projectId);
         let updatedCount = 0;
         const nextQuestions = [...questions];
@@ -358,7 +411,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
             }
 
             const updated = { ...target, correct_answer: finalAnswer };
-            await upsertProjectQuestion(updated);
+            await upsertProjectQuestion(token, updated);
             const idx = nextQuestions.findIndex((q) => q.id === target.id);
             if (idx >= 0) nextQuestions[idx] = updated;
             updatedCount++;
@@ -370,12 +423,13 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: false as const, error: err instanceof Error ? err.message : "อัปเดตเฉลยคำตอบไม่สำเร็จ" };
       }
     },
-    [questions]
+    [questions, session]
   );
 
   const gradeProjectExams = useCallback(
     async (projectId: string) => {
       try {
+        const token = requireAdminToken(session);
         const projectQsAll = questions.filter((q) => q.project_id === projectId);
         const gradedQs = projectQsAll.filter((q) => {
           const pts = typeof q.points === "number" ? q.points : 1;
@@ -392,7 +446,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         const { gradeProjectExamsRpc } = await import("@/lib/supabase/projects");
         let rpcResult = { graded_total: 0, passed_total: 0 };
         try {
-          rpcResult = await gradeProjectExamsRpc(projectId);
+          rpcResult = await gradeProjectExamsRpc(token, projectId);
         } catch (rpcErr) {
           const msg = rpcErr instanceof Error ? rpcErr.message : String(rpcErr);
           if (/missing_answer_keys/i.test(msg)) {
@@ -470,7 +524,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: false as const, error: msg };
       }
     },
-    [projects, questions]
+    [projects, questions, session]
   );
 
   const registerCandidate = useCallback(
@@ -546,57 +600,30 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       try {
         const rawId = profileIdOrAdmin.trim();
         const rawPhone = phoneOrPassword.trim();
-        const digitsId = rawId.replace(/\D/g, "");
-        const digitsPhone = rawPhone.replace(/\D/g, "");
-
-        let candidate = await findProfileForLogin(rawId, rawPhone);
-
-        // Fallback 1: Search local candidates array in store state
-        if (!candidate) {
-          const matchLocal = candidates.find((c) => {
-            const candIdDigits = c.id.replace(/\D/g, "");
-            const candPhoneDigits = (c.phone || "").replace(/\D/g, "");
-            const idMatch = c.id === rawId || (digitsId && candIdDigits === digitsId);
-            const phoneMatch =
-              c.phone.trim() === rawPhone ||
-              (digitsPhone && candPhoneDigits === digitsPhone) ||
-              c.phone.trim() === digitsPhone;
-            return idMatch && (phoneMatch || (digitsId.length === 13 && candIdDigits === digitsId));
-          });
-          if (matchLocal) candidate = matchLocal;
-        }
-
-        // Fallback 2: Check all profiles from fetchAllProfiles
-        if (!candidate && (rawId || digitsId)) {
-          try {
-            const allProfs = await fetchAllProfiles();
-            const matchProf = allProfs.find((c) => {
-              const candIdDigits = c.id.replace(/\D/g, "");
-              const candPhoneDigits = (c.phone || "").replace(/\D/g, "");
-              const idMatch = c.id === rawId || (digitsId && candIdDigits === digitsId);
-              const phoneMatch =
-                c.phone.trim() === rawPhone ||
-                (digitsPhone && candPhoneDigits === digitsPhone) ||
-                c.phone.trim() === digitsPhone;
-              return idMatch && (phoneMatch || (digitsId.length === 13 && candIdDigits === digitsId));
-            });
-            if (matchProf) candidate = matchProf;
-          } catch {
-            /* ignore */
-          }
-        }
+        const candidate = await findProfileForLogin(rawId, rawPhone);
 
         if (!candidate) return { ok: false as const, error: "เลขบัตรประชาชนหรือเบอร์โทรศัพท์ไม่ถูกต้อง" };
         persistSession({ kind: "candidate", candidate });
+        setCandidates([candidate]);
         return { ok: true as const };
       } catch (err) {
         const rawId = profileIdOrAdmin.trim();
+        const rawPhone = phoneOrPassword.trim();
         const digitsId = rawId.replace(/\D/g, "");
-        const matchLocal = candidates.find(
-          (c) => c.id === rawId || (digitsId && c.id.replace(/\D/g, "") === digitsId)
-        );
+        const digitsPhone = rawPhone.replace(/\D/g, "");
+        const matchLocal = candidates.find((c) => {
+          const candIdDigits = c.id.replace(/\D/g, "");
+          const candPhoneDigits = (c.phone || "").replace(/\D/g, "");
+          const idMatch = c.id === rawId || (digitsId && candIdDigits === digitsId);
+          const phoneMatch =
+            (c.phone || "").trim() === rawPhone ||
+            (digitsPhone && candPhoneDigits === digitsPhone) ||
+            (c.phone || "").trim() === digitsPhone;
+          return idMatch && phoneMatch;
+        });
         if (matchLocal) {
           persistSession({ kind: "candidate", candidate: matchLocal });
+          setCandidates([matchLocal]);
           return { ok: true as const };
         }
         return {
@@ -613,6 +640,12 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       const result = await adminLoginRpc(username, password);
       if (!result.ok) return { ok: false as const, error: result.error };
       persistSession({ kind: "admin", admin: result.admin, token: result.token });
+      try {
+        const adminQs = await adminFetchProjectQuestions(result.token);
+        if (adminQs.length) setQuestions(adminQs);
+      } catch {
+        /* public questions remain */
+      }
       return { ok: true as const, mustChangePassword: result.admin.must_change_password };
     },
     [persistSession]
@@ -653,6 +686,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       try {
         await upsertWatchProgressToDb({
           profile_id: candidateId,
+          phone: session.candidate.phone,
           video_id: next.video_id,
           watched_seconds: next.watched_seconds,
           duration_seconds: next.duration_seconds,
@@ -697,6 +731,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
 
         await upsertExamProgressToDb({
           profile_id: candidateId,
+          phone: session.candidate.phone,
           project_id: pId,
           answers,
           status: "draft",
@@ -744,6 +779,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
 
         await upsertExamProgressToDb({
           profile_id: candidateId,
+          phone: session.candidate.phone,
           project_id: pId,
           answers,
           status: "submitted",
@@ -840,17 +876,14 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       >
     ) => {
       try {
-        await updateProfile(id, patch);
-        const mergeCandidate = (c: Candidate): Candidate => {
-          const next = { ...c, ...patch };
-          const titleTh = next.title_other_th || next.title_th || "";
-          next.full_name = `${titleTh} ${next.first_name} ${next.last_name}`.trim();
-          return next;
-        };
-        setCandidates((prev) => prev.map((c) => (c.id === id ? mergeCandidate(c) : c)));
+        if (session?.kind !== "candidate" || session.candidate.id !== id) {
+          return { ok: false as const, error: "ยืนยันตัวตนไม่สำเร็จ" };
+        }
+        const updatedProfile = await updateOwnProfile(id, session.candidate.phone, patch);
+        setCandidates((prev) => prev.map((c) => (c.id === id ? updatedProfile : c)));
         setSession((prev) => {
           if (prev?.kind === "candidate" && prev.candidate.id === id) {
-            const updated: SessionUser = { kind: "candidate", candidate: mergeCandidate(prev.candidate) };
+            const updated: SessionUser = { kind: "candidate", candidate: updatedProfile };
             writeSession(updated);
             return updated;
           }
@@ -861,18 +894,46 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: false as const, error: err instanceof Error ? err.message : "อัปเดตไม่สำเร็จ" };
       }
     },
-    []
+    [session]
   );
 
   const adminUpdateCandidate = useCallback(
-    (id: string, patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>) =>
-      updateCandidateProfile(id, patch),
-    [updateCandidateProfile]
+    async (id: string, patch: Partial<Pick<Candidate, "first_name" | "last_name" | "phone" | "remark">>) => {
+      try {
+        const token = requireAdminToken(session);
+        const existing = candidates.find((c) => c.id === id);
+        const result = await adminUpdateProfileRpc(token, {
+          profile_id: id,
+          first_name: patch.first_name ?? existing?.first_name ?? "",
+          last_name: patch.last_name ?? existing?.last_name ?? "",
+          phone: patch.phone ?? existing?.phone ?? "",
+          remark: patch.remark ?? existing?.remark,
+        });
+        if (!result.ok) return result;
+        setCandidates((prev) =>
+          prev.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  ...patch,
+                  full_name: `${patch.first_name ?? c.first_name} ${patch.last_name ?? c.last_name}`.trim(),
+                }
+              : c
+          )
+        );
+        return { ok: true as const };
+      } catch (err) {
+        return { ok: false as const, error: err instanceof Error ? err.message : "อัปเดตไม่สำเร็จ" };
+      }
+    },
+    [candidates, session]
   );
 
   const adminDeleteCandidate = useCallback(async (id: string) => {
     try {
-      await deleteProfile(id);
+      const token = requireAdminToken(session);
+      const result = await adminDeleteProfileRpc(token, id);
+      if (!result.ok) return result;
       setCandidates((prev) => prev.filter((c) => c.id !== id));
       setWatchProgress((prev) => prev.filter((w) => w.candidate_id !== id));
       setExamProgress((prev) => prev.filter((e) => e.candidate_id !== id));
@@ -881,7 +942,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : "ลบไม่สำเร็จ" };
     }
-  }, [refreshData]);
+  }, [refreshData, session]);
 
   const getWatchFor = useCallback(
     (candidateId: string, videoId?: string) =>

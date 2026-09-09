@@ -115,10 +115,12 @@ admins 1──<N sessions | audit_logs | purge_history
 
 ---
 
-## V1.0 product rules (compact)
+## Security (v1 harden)
 
-- One site project (`getSiteProject()`).
-- Registrations admin: **delete only** (candidates edit own profile).
-- Submitted-exams admin: **Retake + Delete** always visible; show pass/score only after `graded_at`.
-- Number inputs: no wheel/arrow accidental change.
-- Nav: hide Register when logged in; profile via menu / hero CTA.
+Run `supabase/harden_security_v1.sql` before deploying the app that uses it.
+
+Locks: profiles / exam_progress / watch_progress / project_questions (no open CRUD).
+Public: schools, districts, projects, videos, `public_project_questions` (no keys).
+Candidate: phone-proof RPCs (`login_profile`, `register_profile`, progress upserts).
+Admin: token RPCs for projects/questions/grading; bcrypt-only admin passwords.
+

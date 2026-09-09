@@ -5,8 +5,7 @@ import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
 import { getSiteProject } from "@/lib/siteSettings";
-import { adminDeleteProfileRpc, adminSearchProfiles } from "@/lib/supabase/admin";
-import { fetchExamProgressByProfiles } from "@/lib/supabase/data";
+import { adminDeleteProfileRpc, adminListExamProgressRpc, adminSearchProfiles } from "@/lib/supabase/admin";
 import { inputClass } from "@/lib/styles";
 import type { Candidate, ExamProgress } from "@/types/ict";
 
@@ -60,7 +59,12 @@ function CandidatesContent() {
       if (local) fromStore[row.id] = local;
     }
     try {
-      const fromDb = await fetchExamProgressByProfiles(
+      if (!adminToken) {
+        setExamMap(fromStore);
+        return;
+      }
+      const fromDb = await adminListExamProgressRpc(
+        adminToken,
         rows.map((r) => r.id),
         projectId
       );

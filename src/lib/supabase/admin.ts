@@ -281,6 +281,57 @@ export async function adminSearchProfiles(token: string, query: string, limit = 
   });
 }
 
+export async function adminListExamProgressRpc(
+  token: string,
+  profileIds: string[],
+  projectId?: string
+): Promise<
+  {
+    candidate_id: string;
+    project_id?: string;
+    answers: Record<string, string>;
+    status: "draft" | "submitted";
+    score?: number;
+    passed?: boolean;
+    graded_at?: string;
+    updated_at: string;
+  }[]
+> {
+  if (profileIds.length === 0) return [];
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_exam_progress", {
+    p_token: token,
+    p_profile_ids: profileIds,
+    p_project_id: projectId ?? null,
+  });
+  if (error) throw adminRpcFail(error);
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => {
+    const row = asObj(item);
+    return {
+      candidate_id: String(row.profile_id ?? ""),
+      project_id: row.project_id ? String(row.project_id) : undefined,
+      answers: (row.answers as Record<string, string>) || {},
+      status: row.status === "submitted" ? ("submitted" as const) : ("draft" as const),
+      score: row.score != null ? Number(row.score) : undefined,
+      passed: typeof row.passed === "boolean" ? row.passed : undefined,
+      graded_at: row.graded_at ? String(row.graded_at) : undefined,
+      updated_at: row.updated_at ? String(row.updated_at) : new Date().toISOString(),
+    };
+  });
+}
+
+export async function adminListQuestionsRpc(token: string, projectId?: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_questions", {
+    p_token: token,
+    p_project_id: projectId ?? null,
+  });
+  if (error) throw adminRpcFail(error);
+  if (!Array.isArray(data)) return [];
+  return data;
+}
+
 export async function adminUnlockExamRpc(
   token: string,
   profileId: string,
