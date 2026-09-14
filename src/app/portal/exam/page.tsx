@@ -25,7 +25,6 @@ type ExamWorkspaceProps = {
   exam: ExamProgress | undefined;
   locked: boolean;
   initialAnswers: Record<string, string>;
-  initialSavedAt: string | null;
 };
 
 function ExamWorkspace({
@@ -34,13 +33,11 @@ function ExamWorkspace({
   exam,
   locked,
   initialAnswers,
-  initialSavedAt,
 }: ExamWorkspaceProps) {
   const { saveExamDraft, submitExam } = useIctStore();
 
   const [answers, setAnswers] = useState<Record<string, string>>(initialAnswers);
   const [lastSavedAnswers, setLastSavedAnswers] = useState<Record<string, string>>(initialAnswers);
-  const [savedAt, setSavedAt] = useState<string | null>(initialSavedAt);
   /** hidden until first save in this session; then saved | dirty */
   const [syncStatus, setSyncStatus] = useState<"hidden" | "saved" | "dirty">("hidden");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -90,7 +87,6 @@ function ExamWorkspace({
         return false;
       }
       setLastSavedAnswers(answers);
-      setSavedAt(new Date().toISOString());
       setSyncStatus("saved");
       setSaveMessage("บันทึกคำตอบล่าสุดแล้ว");
       return true;
@@ -399,14 +395,13 @@ function ExamContent() {
       exam={exam}
       locked={locked}
       initialAnswers={exam?.answers ?? {}}
-      initialSavedAt={exam?.updated_at ?? null}
     />
   );
 }
 
 export default function ExamPage() {
   return (
-    <AuthGuard>
+    <AuthGuard requirePortalRoles={["user", "school_admin"]}>
       <ExamContent />
     </AuthGuard>
   );

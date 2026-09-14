@@ -1,5 +1,20 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Candidate, DistrictStat, ExamProgress, School, SchoolTotals } from "@/types/ict";
+import type {
+  AuditUser,
+  BusinessUser,
+  Candidate,
+  DistrictStat,
+  ExamProgress,
+  PortalRole,
+  School,
+  SchoolTotals,
+  UserMissionProgress,
+} from "@/types/ict";
+
+function asPortalRole(value: unknown): PortalRole {
+  if (value === "school_admin") return "school_admin";
+  return "user";
+}
 
 type SchoolRow = {
   school_id: string;
@@ -31,12 +46,18 @@ type ProfileRow = {
   duty?: string | null;
   line_id?: string | null;
   email?: string | null;
+  contact_email?: string | null;
+  login_email?: string | null;
   created_at: string | null;
   schools?: { school_name: string } | { school_name: string }[] | null;
   is_school_admin?: boolean | null;
   must_set_password?: boolean | null;
   ict_talent_cohort?: string | null;
   ict_survey?: Record<string, unknown> | null;
+  portal_role?: string | null;
+  is_active?: boolean | null;
+  deleted_at?: string | null;
+  assigned_district_id?: string | null;
 };
 
 function districtName(row: SchoolRow): string {
@@ -96,7 +117,9 @@ export function mapProfileRow(row: ProfileRow): Candidate {
     position: row.position ?? undefined,
     duty: row.duty ?? undefined,
     line_id: row.line_id ?? undefined,
-    email: row.email ?? undefined,
+    email: row.contact_email ?? row.email ?? undefined,
+    contact_email: row.contact_email ?? row.email ?? undefined,
+    login_email: row.login_email ?? undefined,
     is_school_admin: Boolean(row.is_school_admin),
     must_set_password: row.must_set_password !== false && row.must_set_password !== undefined
       ? Boolean(row.must_set_password)
@@ -105,6 +128,9 @@ export function mapProfileRow(row: ProfileRow): Candidate {
         : undefined,
     ict_talent_cohort: row.ict_talent_cohort ?? undefined,
     ict_survey: row.ict_survey ?? undefined,
+    portal_role: asPortalRole(row.portal_role ?? (row.is_school_admin ? "school_admin" : "user")),
+    is_active: row.is_active !== false,
+    deleted_at: row.deleted_at ?? null,
     created_at: row.created_at ?? new Date().toISOString(),
   };
 }
@@ -235,7 +261,12 @@ function mapRpcProfileJson(raw: Record<string, unknown>): Candidate {
     position: raw.position == null ? null : String(raw.position),
     duty: raw.duty == null ? null : String(raw.duty),
     line_id: raw.line_id == null ? null : String(raw.line_id),
-    email: raw.email == null ? null : String(raw.email),
+    email: raw.email == null && raw.contact_email == null ? null : String(raw.contact_email ?? raw.email),
+    contact_email:
+      raw.contact_email == null && raw.email == null
+        ? null
+        : String(raw.contact_email ?? raw.email),
+    login_email: raw.login_email == null ? null : String(raw.login_email),
     created_at: raw.created_at == null ? null : String(raw.created_at),
     schools: raw.school_name ? { school_name: String(raw.school_name) } : null,
     is_school_admin: Boolean(raw.is_school_admin),
@@ -245,6 +276,9 @@ function mapRpcProfileJson(raw: Record<string, unknown>): Candidate {
       raw.ict_survey && typeof raw.ict_survey === "object"
         ? (raw.ict_survey as Record<string, unknown>)
         : null,
+    portal_role: raw.portal_role == null ? null : String(raw.portal_role),
+    is_active: raw.is_active == null ? true : Boolean(raw.is_active),
+    deleted_at: raw.deleted_at == null ? null : String(raw.deleted_at),
   });
 }
 
@@ -385,14 +419,17 @@ export async function updateOwnProfile(
 
 /** @deprecated Direct profile updates are blocked. Use updateOwnProfile or admin RPCs. */
 export async function updateProfile(
-  _profileId: string,
-  _patch: OwnProfilePatch
+  profileId: string,
+  patch: OwnProfilePatch
 ): Promise<void> {
+  void profileId;
+  void patch;
   throw new Error("updateProfile is deprecated; use updateOwnProfile or admin RPCs");
 }
 
 /** @deprecated Direct profile deletes are blocked. Use adminDeleteProfileRpc. */
-export async function deleteProfile(_profileId: string): Promise<void> {
+export async function deleteProfile(profileId: string): Promise<void> {
+  void profileId;
   throw new Error("deleteProfile is deprecated; use adminDeleteProfileRpc");
 }
 
@@ -418,36 +455,163 @@ export async function findProfileForLogin(profileId: string, phone: string): Pro
   return candidate;
 }
 
-export type CandidateLoginResult =
-  | { ok: true; candidate: Candidate; needPasswordSetup?: boolean }
-  | { ok: false; error: string; needPasswordSetup?: boolean };
+export type PortalLoginResult =
+  | { ok: true; kind: "candidate"; candidate: Candidate }
+  | { ok: true; kind: "business"; user: BusinessUser }
+  | { ok: true; kind: "audit"; user: AuditUser }
+  | {
+      ok: false;
+      error: string;
+      needPasswordSetup?: boolean;
+      setupKind?: "candidate" | "business" | "audit";
+      loginEmailForSetup?: string;
+      profileIdForSetup?: string;
+    };
+
+/** @deprecated Use PortalLoginResult */
+export type CandidateLoginResult = PortalLoginResult;
+
+/** Whether this email still needs a first password. Unknown emails are treated as normal login. */
+export async function fetchLoginSetupStatus(email: string): Promise<{
+  needsPasswordSetup: boolean;
+  kind: "candidate" | "business" | "audit" | "unknown";
+}> {
+  const id = email.trim().toLowerCase();
+  if (!id) return { needsPasswordSetup: false, kind: "unknown" };
+
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("login_setup_status", { p_email: id });
+  if (error) return { needsPasswordSetup: false, kind: "unknown" };
+
+  const row = asRpcObj(data);
+  const kindRaw = String(row.kind ?? "unknown");
+  const kind =
+    kindRaw === "candidate" || kindRaw === "business" || kindRaw === "audit" ? kindRaw : "unknown";
+  return {
+    needsPasswordSetup: kind === "candidate" && Boolean(row.needs_password_setup),
+    kind,
+  };
+}
 
 export async function loginCandidateWithPassword(
-  profileId: string,
+  email: string,
   password: string
-): Promise<CandidateLoginResult> {
+): Promise<PortalLoginResult> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("login_candidate", {
-    p_profile_id: profileId.trim(),
+    p_email: email.trim().toLowerCase(),
     p_password: password,
   });
   if (error) return { ok: false, error: error.message };
 
   const row = asRpcObj(data);
   if (!row.ok) {
+    const setupKindRaw = String(row.kind ?? "candidate");
+    const setupKind =
+      setupKindRaw === "business" || setupKindRaw === "audit" ? setupKindRaw : "candidate";
     return {
       ok: false,
       error: String(row.error ?? "เข้าสู่ระบบไม่สำเร็จ"),
       needPasswordSetup: Boolean(row.need_password_setup),
+      setupKind,
+      loginEmailForSetup: row.login_email
+        ? String(row.login_email)
+        : email.trim().toLowerCase(),
+      profileIdForSetup: row.profile_id ? String(row.profile_id) : undefined,
     };
   }
-  return { ok: true, candidate: mapRpcProfileJson(asRpcObj(row.profile)) };
+
+  const kind = String(row.kind ?? "candidate");
+  if (kind === "business") {
+    const u = asRpcObj(row.user);
+    return {
+      ok: true,
+      kind: "business",
+      user: {
+        id: String(u.id),
+        login_email: String(u.login_email ?? ""),
+        display_name: String(u.display_name ?? ""),
+        position: u.position == null ? null : String(u.position),
+        must_set_password: Boolean(u.must_set_password),
+      },
+    };
+  }
+  if (kind === "audit") {
+    const u = asRpcObj(row.user);
+    const districts = parseDistrictIdList(u.assigned_districts);
+    return {
+      ok: true,
+      kind: "audit",
+      user: {
+        id: String(u.id),
+        login_email: String(u.login_email ?? ""),
+        display_name: String(u.display_name ?? ""),
+        position: u.position == null ? null : String(u.position),
+        assigned_districts: districts,
+        must_set_password: Boolean(u.must_set_password),
+      },
+    };
+  }
+
+  return { ok: true, kind: "candidate", candidate: mapRpcProfileJson(asRpcObj(row.profile)) };
 }
 
-export async function verifyCandidateForPassword(profileId: string, phone: string) {
+export async function setExecutivePassword(
+  kind: "business" | "audit",
+  loginId: string,
+  currentPassword: string,
+  newPassword: string
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("set_executive_password", {
+    p_kind: kind,
+    p_login_id: loginId.trim().toLowerCase(),
+    p_current_password: currentPassword,
+    p_new_password: newPassword,
+  });
+  if (error) return { ok: false as const, error: error.message };
+  const row = asRpcObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "ตั้งรหัสผ่านไม่สำเร็จ") };
+  const u = asRpcObj(row.user);
+  if (String(row.kind) === "audit") {
+    return {
+      ok: true as const,
+      kind: "audit" as const,
+      user: {
+        id: String(u.id),
+        login_email: String(u.login_email ?? ""),
+        display_name: String(u.display_name ?? ""),
+        position: u.position == null ? null : String(u.position),
+        assigned_districts: parseDistrictIdList(u.assigned_districts),
+        must_set_password: false,
+      } satisfies AuditUser,
+    };
+  }
+  return {
+    ok: true as const,
+    kind: "business" as const,
+    user: {
+      id: String(u.id),
+      login_email: String(u.login_email ?? ""),
+      display_name: String(u.display_name ?? ""),
+      position: u.position == null ? null : String(u.position),
+      must_set_password: false,
+    } satisfies BusinessUser,
+  };
+}
+
+export async function logPortalLogout(profileId: string, phone: string) {
+  const supabase = createClient();
+  await supabase.rpc("log_portal_logout", {
+    p_profile_id: profileId,
+    p_phone: phone,
+  });
+}
+
+export async function verifyCandidateForPassword(email: string, phone: string) {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("verify_candidate_for_password", {
-    p_profile_id: profileId.trim(),
+    p_email: email.trim().toLowerCase(),
     p_phone: phone.trim(),
   });
   if (error) return { ok: false as const, error: error.message };
@@ -461,17 +625,48 @@ export async function verifyCandidateForPassword(profileId: string, phone: strin
   return {
     ok: true as const,
     profile_id: String(row.profile_id),
+    login_email: String(row.login_email ?? email.trim().toLowerCase()),
     must_set_password: Boolean(row.must_set_password),
     has_password: Boolean(row.has_password),
   };
 }
 
-export async function setCandidatePassword(profileId: string, phone: string, newPassword: string) {
+/** Forgot password: National ID (profile_id) + current phone */
+export async function verifyCandidateForgotPassword(nationalId: string, phone: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("verify_candidate_forgot_password", {
+    p_national_id: nationalId.trim(),
+    p_phone: phone.trim(),
+  });
+  if (error) return { ok: false as const, error: error.message };
+  const row = asRpcObj(data);
+  if (!row.ok) {
+    return {
+      ok: false as const,
+      error: String(row.error ?? "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้งหรือติดต่อผู้ดูแลระบบ"),
+    };
+  }
+  return {
+    ok: true as const,
+    profile_id: String(row.profile_id),
+    login_email: String(row.login_email ?? ""),
+    must_set_password: Boolean(row.must_set_password),
+    has_password: Boolean(row.has_password),
+  };
+}
+
+export async function setCandidatePassword(
+  email: string,
+  phone: string,
+  newPassword: string,
+  nationalId?: string | null
+) {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("set_candidate_password", {
-    p_profile_id: profileId.trim(),
+    p_email: email.trim().toLowerCase(),
     p_phone: phone.trim(),
     p_new_password: newPassword,
+    p_national_id: nationalId?.trim() || null,
   });
   if (error) return { ok: false as const, error: error.message };
   const row = asRpcObj(data);
@@ -482,6 +677,304 @@ export async function setCandidatePassword(profileId: string, phone: string, new
     };
   }
   return { ok: true as const, candidate: mapRpcProfileJson(asRpcObj(row.profile)) };
+}
+
+export async function fetchMyMissions(
+  profileId: string,
+  phone: string
+): Promise<UserMissionProgress[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("get_my_missions", {
+    p_profile_id: profileId,
+    p_phone: phone,
+  });
+  if (error) throw new Error(error.message);
+  const row = asRpcObj(data);
+  if (!row.ok) throw new Error(String(row.error ?? "โหลดภารกิจไม่สำเร็จ"));
+  if (!Array.isArray(row.missions)) return [];
+  return row.missions.map((item) => {
+    const m = asRpcObj(item);
+    return {
+      id: String(m.id),
+      title: String(m.title ?? ""),
+      description: m.description == null ? null : String(m.description),
+      sequence_order: Number(m.sequence_order) || 0,
+      validation_type:
+        m.validation_type === "exam_completion" || m.validation_type === "manual"
+          ? m.validation_type
+          : "url_submission",
+      status: m.status === "completed" ? ("completed" as const) : ("pending" as const),
+      submitted_data:
+        m.submitted_data && typeof m.submitted_data === "object"
+          ? (m.submitted_data as Record<string, unknown>)
+          : {},
+      completed_at: m.completed_at ? String(m.completed_at) : null,
+    };
+  });
+}
+
+export async function submitMissionUrl(
+  profileId: string,
+  phone: string,
+  missionId: string,
+  videoUrl: string
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("submit_mission_url", {
+    p_profile_id: profileId,
+    p_phone: phone,
+    p_mission_id: missionId,
+    p_video_url: videoUrl,
+  });
+  if (error) return { ok: false as const, error: error.message };
+  const row = asRpcObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export type ExecutiveOpsTotals = {
+  schools: number;
+  registered_schools: number;
+  districts: number;
+  users: number;
+  active_users: number;
+  active_30d: number;
+  learn_started: number;
+  learn_completed: number;
+  exam_submitted: number;
+  exam_passed: number;
+  school_updates: number;
+  school_updates_30d: number;
+  registrations_30d: number;
+  missions_completed: number;
+  partners: number;
+};
+
+export type ExecutiveTrendPoint = {
+  week_start: string;
+  registrations: number;
+  learn_completed: number;
+  exam_submitted: number;
+  school_updates: number;
+};
+
+export type ExecutiveDistrictRow = {
+  district_id: string;
+  district_name: string;
+  province: string;
+  schools: number;
+  registered: number;
+  users: number;
+  active_users: number;
+  learn_completed: number;
+  exam_submitted: number;
+  exam_passed: number;
+  school_updates: number;
+  school_updates_30d: number;
+};
+
+export type ExecutiveSchoolActivity = {
+  school_id: string;
+  school_name: string;
+  district_name: string;
+  province: string;
+  activity: number;
+  users: number;
+};
+
+export type ExecutivePartnerStat = {
+  partner: string;
+  schools: number;
+  participating: number;
+  not_participating: number;
+};
+
+export type ExecutiveOpsDashboard = {
+  kind: "business" | "audit";
+  needs_domains: boolean;
+  districts_assigned: number;
+  totals: ExecutiveOpsTotals;
+  trend: ExecutiveTrendPoint[];
+  districts: ExecutiveDistrictRow[];
+  active_schools: ExecutiveSchoolActivity[];
+  inactive_schools: ExecutiveSchoolActivity[];
+  partners: ExecutivePartnerStat[];
+  has_partner_stats: boolean;
+};
+
+export function parseDistrictIdList(value: unknown): string[] {
+  let raw = value;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) {
+      try {
+        raw = JSON.parse(trimmed) as unknown;
+      } catch {
+        return [trimmed];
+      }
+    } else {
+      return [trimmed];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  const ids: string[] = [];
+  for (const item of raw) {
+    let id = "";
+    if (typeof item === "string" || typeof item === "number") id = String(item).trim();
+    else if (item && typeof item === "object") {
+      const row = item as Record<string, unknown>;
+      const picked = row.district_id ?? row.id ?? row.districtId;
+      if (picked != null) id = String(picked).trim();
+    }
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function mapSchoolActivity(value: unknown): ExecutiveSchoolActivity[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = asRpcObj(item);
+    return {
+      school_id: String(row.school_id ?? ""),
+      school_name: String(row.school_name ?? ""),
+      district_name: String(row.district_name ?? ""),
+      province: String(row.province ?? ""),
+      activity: num(row.activity),
+      users: num(row.users),
+    };
+  });
+}
+
+function num(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export async function fetchExecutiveOpsDashboard(
+  kind: "business" | "audit",
+  loginId: string
+): Promise<ExecutiveOpsDashboard> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("executive_ops_dashboard", {
+    p_kind: kind,
+    p_login_id: loginId.trim().toLowerCase(),
+  });
+  if (error) throw new Error(error.message);
+  const row = asRpcObj(data);
+  if (!row.ok) throw new Error(String(row.error ?? "โหลดแดชบอร์ดไม่สำเร็จ"));
+
+  const totals = asRpcObj(row.totals);
+  const trend = Array.isArray(row.trend) ? row.trend : [];
+  const districts = Array.isArray(row.districts) ? row.districts : [];
+
+  return {
+    kind,
+    needs_domains: Boolean(row.needs_domains),
+    districts_assigned: num(row.districts_assigned),
+    totals: {
+      schools: num(totals.schools),
+      registered_schools: num(totals.registered_schools),
+      districts: num(totals.districts),
+      users: num(totals.users),
+      active_users: num(totals.active_users),
+      active_30d: num(totals.active_30d),
+      learn_started: num(totals.learn_started),
+      learn_completed: num(totals.learn_completed),
+      exam_submitted: num(totals.exam_submitted),
+      exam_passed: num(totals.exam_passed),
+      school_updates: num(totals.school_updates),
+      school_updates_30d: num(totals.school_updates_30d),
+      registrations_30d: num(totals.registrations_30d),
+      missions_completed: num(totals.missions_completed),
+      partners: num(totals.partners),
+    },
+    trend: trend.map((item) => {
+      const t = asRpcObj(item);
+      return {
+        week_start: String(t.week_start ?? ""),
+        registrations: num(t.registrations),
+        learn_completed: num(t.learn_completed),
+        exam_submitted: num(t.exam_submitted),
+        school_updates: num(t.school_updates),
+      };
+    }),
+    districts: districts.map((item) => {
+      const d = asRpcObj(item);
+      return {
+        district_id: String(d.district_id ?? ""),
+        district_name: String(d.district_name ?? ""),
+        province: String(d.province ?? ""),
+        schools: num(d.schools),
+        registered: num(d.registered),
+        users: num(d.users),
+        active_users: num(d.active_users),
+        learn_completed: num(d.learn_completed),
+        exam_submitted: num(d.exam_submitted),
+        exam_passed: num(d.exam_passed),
+        school_updates: num(d.school_updates),
+        school_updates_30d: num(d.school_updates_30d),
+      };
+    }),
+    active_schools: mapSchoolActivity(row.active_schools),
+    inactive_schools: mapSchoolActivity(row.inactive_schools),
+    partners: mapPartnerStats(row.partners),
+    has_partner_stats: Array.isArray(row.partners),
+  };
+}
+
+function mapPartnerStats(value: unknown): ExecutivePartnerStat[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = asRpcObj(item);
+    return {
+      partner: String(row.partner ?? "ไม่ระบุ Partner"),
+      schools: num(row.schools),
+      participating: num(row.participating),
+      not_participating: num(row.not_participating),
+    };
+  });
+}
+
+export async function updateExecutiveProfile(input: {
+  kind: "business" | "audit";
+  loginId: string;
+  displayName: string;
+  position: string;
+  districts?: string[];
+}) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("update_executive_profile", {
+    p_kind: input.kind,
+    p_login_id: input.loginId.trim().toLowerCase(),
+    p_display_name: input.displayName.trim(),
+    p_position: input.position.trim(),
+    p_districts: input.kind === "audit" ? input.districts ?? [] : null,
+  });
+  if (error) return { ok: false as const, error: error.message };
+  const row = asRpcObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกไม่สำเร็จ") };
+  const user = asRpcObj(row.user);
+  const districts = parseDistrictIdList(user.assigned_districts);
+  return {
+    ok: true as const,
+    user: {
+      id: String(user.id ?? ""),
+      login_email: String(user.login_email ?? ""),
+      display_name: String(user.display_name ?? ""),
+      position: user.position == null ? null : String(user.position),
+      assigned_districts: districts,
+      must_set_password: Boolean(user.must_set_password),
+    },
+  };
+}
+
+export async function fetchExecutiveSummary() {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("executive_summary_stats");
+  if (error) throw new Error(error.message);
+  return asRpcObj(data);
 }
 
 export async function getSchoolProfileForAdmin(profileId: string, phone: string) {
@@ -572,9 +1065,11 @@ export async function upsertExamProgressToDb(input: {
 
 /** @deprecated Public exam progress scans are blocked. Use adminListExamProgressRpc. */
 export async function fetchExamProgressByProfiles(
-  _profileIds: string[],
-  _projectId?: string
+  profileIds: string[],
+  projectId?: string
 ): Promise<ExamProgress[]> {
+  void profileIds;
+  void projectId;
   return [];
 }
 

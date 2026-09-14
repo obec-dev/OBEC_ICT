@@ -1,16 +1,35 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
+import { accessRoleFromSession } from "@/lib/auth/access";
 import { useIctStore } from "@/contexts/IctStore";
 import { SessionMenu } from "./SessionMenu";
 import { ThemeToggle } from "./ThemeToggle";
+import { getSiteProject } from "@/lib/siteSettings";
 
 export function Nav() {
-  const { session, isAdmin } = useIctStore();
+  const { session, isAdmin, examProgress, projects } = useIctStore();
   const isLoggedIn = Boolean(session);
+  const accessRole = accessRoleFromSession(session);
+
+  const showMissions = useMemo(() => {
+    if (session?.kind !== "candidate") return false;
+    if (accessRole !== "user" && accessRole !== "school_admin") return false;
+    const project = getSiteProject(projects);
+    if (!project?.enable_results_visibility) return false;
+    const exam = examProgress.find(
+      (e) =>
+        e.candidate_id === session.candidate.id &&
+        (!project.id || e.project_id === project.id || !e.project_id)
+    );
+    return Boolean(exam?.passed === true && exam?.graded_at);
+  }, [accessRole, session, examProgress, projects]);
+
+  const isCandidate = accessRole === "user" || accessRole === "school_admin";
 
   return (
-    <nav className="sticky top-0 z-50 w-full bg-white dark:bg-slate-900 opacity-100 shadow-md transition-all duration-300">
+    <nav className="sticky top-0 z-50 w-full bg-white dark:bg-slate-950 opacity-100 shadow-md transition-all duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-20">
           <div className="flex items-center gap-8">
@@ -25,7 +44,7 @@ export function Nav() {
                 href="/dashboard"
                 className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
               >
-                ภาพรวม
+                ภาพรวมการลงทะเบียน
               </Link>
               {!isLoggedIn && (
                 <Link
@@ -35,7 +54,7 @@ export function Nav() {
                   ลงทะเบียน
                 </Link>
               )}
-              {session?.kind === "candidate" && (
+              {isCandidate && (
                 <>
                   <Link
                     href="/portal/learn"
@@ -51,12 +70,36 @@ export function Nav() {
                   </Link>
                 </>
               )}
+              {session?.kind === "business" && (
+                <Link
+                  href="/portal/business"
+                  className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
+                >
+                  ภาพรวมโครงการ
+                </Link>
+              )}
+              {session?.kind === "audit" && (
+                <Link
+                  href="/portal/audit"
+                  className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
+                >
+                  เขตที่ดูแล
+                </Link>
+              )}
               {isAdmin && (
                 <Link
                   href="/admin"
                   className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
                 >
                   ผู้ดูแลระบบ
+                </Link>
+              )}
+              {showMissions && (
+                <Link
+                  href="/portal/missions"
+                  className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
+                >
+                  ภารกิจ
                 </Link>
               )}
             </div>

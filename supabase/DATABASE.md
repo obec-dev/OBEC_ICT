@@ -310,14 +310,26 @@ Consent (PDPA)
 **Settings**
 - `admin_get_settings`, `admin_save_settings`
 
-**Registrations**
+**Registrations / Users**
 - `admin_list_profiles_by_school`, `admin_update_profile`
 - `admin_delete_profile`, `admin_delete_school_profiles`
+- `admin_search_users`, `admin_set_portal_role`, `admin_update_login_email`
+- `admin_set_user_active`, `admin_soft_delete_user`, `admin_restore_user`
+- `admin_purge_soft_deleted_users`, `admin_create_special_user`
+- `admin_export_exam_responses`, `admin_export_hierarchy`
+- `admin_mission_progress_stats`
+
+**Portal auth / missions**
+- `login_candidate` (email + password), `log_portal_logout`
+- `list_active_missions`, `get_my_missions`, `submit_mission_url`
+- `executive_summary_stats`
 
 **Audit / overview**
 - `admin_list_audit_logs`, `admin_audit_stats`, `admin_export_audit_logs`
 - `admin_purge_audit_logs`, `admin_list_purge_history`
 - `admin_overview_stats`
+
+Run next: `portal_roles_missions_users_v1.sql`
 
 ---
 

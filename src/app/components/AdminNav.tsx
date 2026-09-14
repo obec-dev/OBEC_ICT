@@ -9,7 +9,7 @@ const links: { href: string; label: string; roles: AdminRole[] }[] = [
   { href: "/admin", label: "เมนูหลัก", roles: ["admin", "super_admin"] },
   { href: "/admin/overview", label: "ภาพรวมผู้ดูแลระบบ", roles: ["admin", "super_admin"] },
   { href: "/admin/projects", label: "จัดการ - โครงการ", roles: ["admin", "super_admin"] },
-  { href: "/admin/registrations", label: "จัดการ - การลงทะเบียน", roles: ["admin", "super_admin"] },
+  { href: "/admin/users", label: "จัดการ - ผู้ใช้งาน", roles: ["admin", "super_admin"] },
   { href: "/admin/candidates", label: "จัดการ - การส่งข้อสอบ", roles: ["admin", "super_admin"] },
   { href: "/admin/config", label: "ตั้งค่าเว็บไซต์", roles: ["super_admin"] },
   { href: "/admin/admins", label: "จัดการผู้ดูแล", roles: ["super_admin"] },
@@ -27,7 +27,7 @@ export function AdminNav() {
   const role: AdminRole = adminUser?.role ?? "admin";
 
   return (
-    <div className="mb-8 flex flex-wrap gap-2">
+    <div className="mb-8 flex flex-wrap gap-2 admin-nav-bar rounded-2xl p-2 dark:bg-slate-950">
       {links
         .filter((l) => l.roles.includes(role))
         .map((l) => {
@@ -40,7 +40,7 @@ export function AdminNav() {
               className={
                 active
                   ? "rounded-full border border-[var(--primary-solid)] bg-[var(--primary-solid)] px-4 py-2 text-sm font-semibold text-white shadow-sm"
-                  : "rounded-full border border-gray-200 dark:border-[var(--border-soft)] bg-white dark:bg-[var(--card-bg)] px-4 py-2 text-sm font-semibold text-[var(--primary-blue)] hover:border-[var(--primary-blue)] transition-colors"
+                  : "rounded-full border border-gray-200 dark:border-slate-700 bg-white dark:bg-black px-4 py-2 text-sm font-semibold text-[var(--primary-blue)] dark:text-white hover:border-[var(--primary-blue)] transition-colors"
               }
             >
               {l.label}
@@ -48,7 +48,7 @@ export function AdminNav() {
           );
         })}
       {isSuperAdmin && (
-        <span className="ml-auto self-center text-xs font-bold text-amber-700 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-full px-3 py-1">
+        <span className="ml-auto self-center text-xs font-bold text-amber-700 dark:text-amber-200 bg-amber-50 dark:bg-black border border-amber-200 dark:border-amber-800 rounded-full px-3 py-1">
           super_admin
         </span>
       )}

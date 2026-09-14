@@ -379,7 +379,7 @@ function LearnContent() {
 
 export default function LearnPage() {
   return (
-    <AuthGuard>
+    <AuthGuard requirePortalRoles={["user", "school_admin"]}>
       <LearnContent />
     </AuthGuard>
   );

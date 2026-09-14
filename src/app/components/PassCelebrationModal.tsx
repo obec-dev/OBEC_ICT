@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { useIctStore } from "@/contexts/IctStore";
 import { getSiteProject } from "@/lib/siteSettings";
 
@@ -8,10 +8,30 @@ function dismissKey(profileId: string, projectId: string) {
   return `ict_pass_dismissed_${profileId}_${projectId}`;
 }
 
+const DISMISS_EVENT = "ict-pass-dismiss";
+
+function usePassDismissed(profileId: string | undefined, projectId: string | undefined) {
+  const key = profileId && projectId ? dismissKey(profileId, projectId) : "";
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      if (!key) return () => {};
+      const onChange = () => onStoreChange();
+      window.addEventListener("storage", onChange);
+      window.addEventListener(DISMISS_EVENT, onChange);
+      return () => {
+        window.removeEventListener("storage", onChange);
+        window.removeEventListener(DISMISS_EVENT, onChange);
+      };
+    },
+    () => (key ? localStorage.getItem(key) === "1" : true),
+    () => true
+  );
+}
+
 export function PassCelebrationModal() {
   const { session, hydrated, projects, getExamFor } = useIctStore();
-  const [open, setOpen] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
+  const [hiddenKey, setHiddenKey] = useState<string | null>(null);
 
   const siteProject = useMemo(() => getSiteProject(projects), [projects]);
   const candidate = session?.kind === "candidate" ? session.candidate : null;
@@ -25,33 +45,22 @@ export function PassCelebrationModal() {
     exam.passed === true &&
     Boolean(exam.graded_at);
 
-  useEffect(() => {
-    if (!shouldCelebrate || !candidate || !siteProject) {
-      setOpen(false);
-      return;
-    }
-    try {
-      if (localStorage.getItem(dismissKey(candidate.id, siteProject.id)) === "1") {
-        setOpen(false);
-        return;
-      }
-    } catch {
-      /* ignore */
-    }
-    setOpen(true);
-  }, [shouldCelebrate, candidate, siteProject]);
+  const sessionKey = candidate && siteProject ? `${candidate.id}:${siteProject.id}` : "";
+  const storedDismissed = usePassDismissed(candidate?.id, siteProject?.id);
+  const hidden = hiddenKey === sessionKey;
 
-  if (!open || !candidate || !siteProject) return null;
+  if (!shouldCelebrate || storedDismissed || hidden || !candidate || !siteProject) return null;
 
   const close = () => {
     if (dontShowAgain) {
       try {
         localStorage.setItem(dismissKey(candidate.id, siteProject.id), "1");
+        window.dispatchEvent(new Event(DISMISS_EVENT));
       } catch {
         /* ignore */
       }
     }
-    setOpen(false);
+    setHiddenKey(sessionKey);
   };
 
   return (

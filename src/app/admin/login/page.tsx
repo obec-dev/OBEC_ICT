@@ -39,7 +39,7 @@ export default function AdminLoginPage() {
     <div className="max-w-md mx-auto px-4 py-16 animate-fade-in-up">
       <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8">
         <h1 className="text-2xl font-extrabold text-[var(--primary-blue)] mb-2">เข้าสู่ระบบผู้ดูแล</h1>
-        <p className="text-gray-500 mb-6 text-sm">ใช้บัญชีจากตาราง admins</p>
+        <p className="text-gray-500 mb-6 text-sm">กรุณาระบุ Username และ Password ของท่าน</p>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">Username</label>

@@ -1,23 +1,42 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { setCandidatePassword, verifyCandidateForPassword } from "@/lib/supabase/data";
+import { clearPasswordSetup } from "@/lib/passwordSetup";
+import {
+  setCandidatePassword,
+  verifyCandidateForPassword,
+  verifyCandidateForgotPassword,
+} from "@/lib/supabase/data";
 import { writeSession } from "@/lib/storage";
 import { inputClass } from "@/lib/styles";
 
 const VERIFY_FAIL_MSG = "ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบอีกครั้งหรือติดต่อผู้ดูแลระบบ";
 
+function LoginEmailBanner({ email }: { email: string }) {
+  if (!email) return null;
+  return (
+    <div className="mb-4 rounded-2xl border border-[var(--primary-blue)]/20 bg-blue-50 px-4 py-3 text-sm text-[var(--primary-blue)]">
+      <span className="font-semibold">อีเมลที่ใช้เข้าสู่ระบบของคุณคือ:</span>{" "}
+      <span className="font-mono font-bold break-all select-all">{email}</span>
+    </div>
+  );
+}
+
 export default function ResetPasswordForm() {
   const searchParams = useSearchParams();
-  const prefillId = useMemo(
-    () => (searchParams.get("id") || "").replace(/\D/g, "").slice(0, 13),
+  const prefillEmail = useMemo(
+    () => (searchParams.get("email") || "").trim().toLowerCase(),
     [searchParams]
   );
+  const isFirstTime = searchParams.get("first") === "1";
 
-  const [step, setStep] = useState<"verify" | "password">("verify");
-  const [profileId, setProfileId] = useState(prefillId);
+  const [step, setStep] = useState<"verify" | "password">(
+    isFirstTime && prefillEmail ? "password" : "verify"
+  );
+  const [email, setEmail] = useState(prefillEmail);
+  const [nationalId, setNationalId] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -25,17 +44,24 @@ export default function ResetPasswordForm() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    clearPasswordSetup();
+  }, []);
+
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSubmitting(true);
     try {
-      const verified = await verifyCandidateForPassword(profileId.trim(), phone.trim());
+      const verified = isFirstTime
+        ? await verifyCandidateForPassword(email.trim(), phone.trim())
+        : await verifyCandidateForgotPassword(nationalId.trim(), phone.trim());
       if (!verified.ok) {
         setError(VERIFY_FAIL_MSG);
         return;
       }
-      setProfileId(verified.profile_id || profileId.trim());
+      const loginEmail = verified.login_email || email.trim().toLowerCase();
+      setEmail(loginEmail);
       setStep("password");
     } catch {
       setError(VERIFY_FAIL_MSG);
@@ -57,16 +83,29 @@ export default function ResetPasswordForm() {
       return;
     }
 
+    const useEmail = email.trim().toLowerCase();
+    const usePhone = phone.trim();
+    if (!useEmail || (!isFirstTime && !usePhone)) {
+      setError("กรุณายืนยันตัวตนก่อนตั้งรหัสผ่าน");
+      setStep("verify");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const result = await setCandidatePassword(profileId.trim(), phone.trim(), password);
+      const result = await setCandidatePassword(
+        useEmail,
+        usePhone,
+        password,
+        isFirstTime ? null : nationalId.trim()
+      );
       if (!result.ok) {
         setError(result.error || "ตั้งรหัสผ่านไม่สำเร็จ");
+        setSubmitting(false);
         return;
       }
       writeSession({ kind: "candidate", candidate: result.candidate });
-      // Full navigation so IctStore re-reads session and auto-login is applied
-      window.location.href = "/portal/learn";
+      window.location.href = "/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "ตั้งรหัสผ่านไม่สำเร็จ");
       setSubmitting(false);
@@ -77,29 +116,58 @@ export default function ResetPasswordForm() {
     <div className="max-w-md mx-auto px-4 py-16 animate-fade-in-up">
       <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8">
         <h1 className="text-2xl font-extrabold text-[var(--primary-blue)] mb-2">
-          {step === "verify" ? "ยืนยันตัวตน" : "ตั้งรหัสผ่านใหม่"}
+          {step === "verify"
+            ? isFirstTime
+              ? "ตั้งรหัสผ่านครั้งแรก"
+              : "ลืมรหัสผ่าน"
+            : "ตั้งรหัสผ่านใหม่"}
         </h1>
         <p className="text-gray-500 mb-6 text-sm">
           {step === "verify"
-            ? "กรอกเลขบัตรประชาชนและเบอร์โทรที่ลงทะเบียน เพื่อยืนยันตัวตนก่อนตั้งรหัสผ่าน"
-            : "ยืนยันตัวตนสำเร็จแล้ว — กรุณาตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)"}
+            ? isFirstTime
+              ? "ยืนยันตัวตนด้วยอีเมล (Login ID) และเบอร์โทรที่ลงทะเบียน เพียงครั้งเดียว"
+              : "ยืนยันตัวตนด้วยเลขบัตรประชาชน และเบอร์โทรปัจจุบัน"
+            : isFirstTime
+              ? "กรุณาตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)"
+              : "ยืนยันตัวตนสำเร็จแล้ว - กรุณาตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)"}
         </p>
+
+        {step === "password" && <LoginEmailBanner email={email} />}
 
         {step === "verify" ? (
           <form onSubmit={handleVerify} className="space-y-4">
-            <div>
-              <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                เลขบัตรประชาชน
-              </label>
-              <input
-                className={inputClass}
-                inputMode="numeric"
-                maxLength={13}
-                value={profileId}
-                onChange={(e) => setProfileId(e.target.value.replace(/\D/g, "").slice(0, 13))}
-                required
-              />
-            </div>
+            {isFirstTime ? (
+              <div>
+                <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                  Login ID (อีเมล)
+                </label>
+                <input
+                  className={inputClass}
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                  เลขบัตรประชาชน (National ID)
+                </label>
+                <input
+                  className={inputClass}
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={nationalId}
+                  onChange={(e) => setNationalId(e.target.value.replace(/\D/g, "").slice(0, 13))}
+                  required
+                  minLength={13}
+                  maxLength={13}
+                />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                 เบอร์โทรศัพท์
@@ -116,10 +184,14 @@ export default function ResetPasswordForm() {
             {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
             <button
               type="submit"
-              disabled={!profileId || !phone || submitting}
+              disabled={
+                submitting ||
+                !phone ||
+                (isFirstTime ? !email : nationalId.length !== 13)
+              }
               className="w-full rounded-full bg-[var(--primary-blue)] text-white py-3.5 font-bold disabled:opacity-40 hover:-translate-y-0.5 transition-all"
             >
-              {submitting ? "กำลังตรวจสอบ..." : "ตรวจสอบข้อมูล"}
+              {submitting ? "กำลังตรวจสอบ..." : "ตรวจสอบข้อมูลก่อนตั้งค่ารหัสผ่านใหม่"}
             </button>
           </form>
         ) : (
@@ -146,16 +218,7 @@ export default function ResetPasswordForm() {
                   title={showPassword ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
                   aria-label={showPassword ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
                 >
-                  {showPassword ? (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.908a8.959 8.959 0 013.682-.793c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21M3 3l18 18" />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                  )}
+                  {showPassword ? "ซ่อน" : "แสดง"}
                 </button>
               </div>
             </div>
@@ -181,18 +244,20 @@ export default function ResetPasswordForm() {
             >
               {submitting ? "กำลังบันทึก..." : "ตั้งรหัสผ่านและเข้าสู่ระบบ"}
             </button>
-            <button
-              type="button"
-              className="w-full text-sm text-gray-500 hover:text-[var(--primary-blue)]"
-              onClick={() => {
-                setStep("verify");
-                setPassword("");
-                setConfirm("");
-                setError("");
-              }}
-            >
-              ← กลับไปยืนยันตัวตนใหม่
-            </button>
+            {!isFirstTime && (
+              <button
+                type="button"
+                className="w-full text-sm text-gray-500 hover:text-[var(--primary-blue)]"
+                onClick={() => {
+                  setStep("verify");
+                  setPassword("");
+                  setConfirm("");
+                  setError("");
+                }}
+              >
+                ← กลับไปยืนยันตัวตนใหม่
+              </button>
+            )}
           </form>
         )}
 

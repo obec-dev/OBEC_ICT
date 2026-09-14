@@ -10,9 +10,19 @@ export function SessionMenu() {
 
   if (!session) return null;
 
-  const label = session.kind === "admin" ? session.admin.full_name : session.candidate.full_name;
-  const initials = label.slice(0, 1);
-  const isSchoolAdmin = session.kind === "candidate" && Boolean(session.candidate.is_school_admin);
+  const label =
+    session.kind === "admin"
+      ? session.admin.full_name
+      : session.kind === "business" || session.kind === "audit"
+        ? session.user.display_name
+        : session.candidate.full_name;
+  const nameForInitial =
+    session.kind === "candidate" ? session.candidate.first_name || label : label;
+  const initials = nameForInitial.trim().slice(0, 1);
+  const isSchoolAdmin =
+    session.kind === "candidate" &&
+    (Boolean(session.candidate.is_school_admin) ||
+      session.candidate.portal_role === "school_admin");
   const roleLabel = session.kind === "admin" ? session.admin.role : null;
 
   return (
@@ -27,7 +37,9 @@ export function SessionMenu() {
         </span>
         <span className="hidden sm:flex flex-col items-start text-left leading-tight max-w-[140px]">
           <span className="text-sm font-semibold text-[var(--primary-blue)] truncate w-full">{label}</span>
-          {roleLabel && <span className="text-[10px] font-medium text-gray-500 dark:text-slate-400">{roleLabel}</span>}
+          {roleLabel && (
+            <span className="text-[10px] font-medium text-gray-500 dark:text-slate-400">{roleLabel}</span>
+          )}
         </span>
       </button>
       {open && (
@@ -40,6 +52,40 @@ export function SessionMenu() {
             >
               เปลี่ยนรหัสผ่าน
             </Link>
+          ) : session.kind === "business" ? (
+            <>
+              <Link
+                href="/portal/business"
+                className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
+                onClick={() => setOpen(false)}
+              >
+                ภาพรวมโครงการ
+              </Link>
+              <Link
+                href="/portal/business/profile"
+                className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
+                onClick={() => setOpen(false)}
+              >
+                โปรไฟล์
+              </Link>
+            </>
+          ) : session.kind === "audit" ? (
+            <>
+              <Link
+                href="/portal/audit"
+                className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
+                onClick={() => setOpen(false)}
+              >
+                เขตที่ดูแล
+              </Link>
+              <Link
+                href="/portal/audit/profile"
+                className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
+                onClick={() => setOpen(false)}
+              >
+                โปรไฟล์
+              </Link>
+            </>
           ) : (
             <>
               <Link
@@ -51,7 +97,7 @@ export function SessionMenu() {
               </Link>
               {isSchoolAdmin && (
                 <Link
-                  href="/portal/profile?tab=school"
+                  href="/portal/school-profile"
                   className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-slate-800 flex items-center gap-2 font-medium"
                   onClick={() => setOpen(false)}
                 >

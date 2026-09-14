@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
+import { AdminReportingPanel } from "@/app/components/AdminReportingPanel";
 import { useIctStore } from "@/contexts/IctStore";
 import { getSiteProject } from "@/lib/siteSettings";
 import {
+  adminMissionProgressStats,
   adminOverviewStats,
   isAdminUnauthorized,
   type AdminOverviewStats,
@@ -141,6 +143,12 @@ function DonutChart({
 function OverviewContent() {
   const { adminToken, projects, examProgress, candidates, logout } = useIctStore();
   const [stats, setStats] = useState<AdminOverviewStats | null>(null);
+  const [missionStats, setMissionStats] = useState<{
+    total_missions: number;
+    total_users: number;
+    completed_pairs: number;
+    avg_completed_per_user: number;
+  } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -159,6 +167,9 @@ function OverviewContent() {
         }
       })
       .finally(() => setLoading(false));
+    void adminMissionProgressStats(adminToken)
+      .then(setMissionStats)
+      .catch(() => setMissionStats(null));
   }, [adminToken, logout]);
 
   const eligible = candidates.length || (stats?.profiles_total ?? 0);
@@ -180,22 +191,24 @@ function OverviewContent() {
     stats && stats.schools_total > 0 ? Math.round((stats.schools_registered / stats.schools_total) * 100) : 0;
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-12 animate-fade-in-up">
+    <div className="max-w-6xl mx-auto px-4 py-12 animate-fade-in-up admin-surface">
       <AdminNav />
 
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">ภาพรวมผู้ดูแลระบบ</h1>
-          <p className="text-gray-500 dark:text-slate-400">
+          <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] dark:text-white mb-2">ภาพรวมผู้ดูแลระบบ</h1>
+          <p className="text-gray-500 dark:text-white/80">
             {siteProject ? siteProject.name : "ติดตามการลงทะเบียนและผลการทดสอบ"}
           </p>
         </div>
-        <Link href="/dashboard" className="text-sm font-bold text-[var(--primary-blue)] underline">
+        <Link href="/dashboard" className="text-sm font-bold text-[var(--primary-blue)] dark:text-white underline">
           เปิดแดชบอร์ดสาธารณะ (รายเขต)
         </Link>
       </div>
 
-      {loading && <p className="text-gray-500 mb-4">กำลังโหลดสถิติ...</p>}
+      <AdminReportingPanel />
+
+      {loading && <p className="text-gray-500 mb-4 mt-6">กำลังโหลดสถิติ...</p>}
       {error && (
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
@@ -224,10 +237,10 @@ function OverviewContent() {
                 tone="amber"
               />
             </div>
-            <div className="rounded-2xl border border-gray-100 bg-white p-5">
+            <div className="rounded-2xl border border-gray-100 bg-white dark:bg-black p-5">
               <div className="flex justify-between text-sm mb-2">
-                <span className="font-semibold text-gray-700">ความคืบหน้าโรงเรียนที่ลงทะเบียน</span>
-                <span className="font-bold text-[var(--primary-blue)]">{pct}%</span>
+                <span className="font-semibold text-gray-700 dark:text-white">ความคืบหน้าโรงเรียนที่ลงทะเบียน</span>
+                <span className="font-bold text-[var(--primary-blue)] dark:text-white">{pct}%</span>
               </div>
               <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
                 <div
@@ -237,6 +250,32 @@ function OverviewContent() {
               </div>
             </div>
           </section>
+
+          {missionStats && (
+            <section className="mb-12">
+              <h2 className="text-xl font-extrabold text-[var(--primary-blue)] dark:text-white mb-1">
+                ความคืบหน้าภารกิจ (Missions)
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-white/70 mb-4">
+                เฉลี่ยภารกิจที่ทำสำเร็จต่อผู้ใช้
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatCard label="ภารกิจที่เปิดใช้" value={missionStats.total_missions} tone="blue" />
+                <StatCard label="ผู้ใช้ที่มีสิทธิ์" value={missionStats.total_users} tone="gray" />
+                <StatCard
+                  label="การทำสำเร็จทั้งหมด"
+                  value={missionStats.completed_pairs}
+                  tone="green"
+                />
+                <StatCard
+                  label="เฉลี่ยต่อผู้ใช้"
+                  value={`${missionStats.avg_completed_per_user}/${missionStats.total_missions || 0}`}
+                  hint="Missions Completed (avg)"
+                  tone="amber"
+                />
+              </div>
+            </section>
+          )}
 
           {/* Part 2 */}
           <section className="border-t border-gray-200 pt-10">

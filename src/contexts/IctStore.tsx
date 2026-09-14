@@ -21,6 +21,7 @@ import {
   fetchSchoolTotals,
   insertProfile,
   loginCandidateWithPassword,
+  logPortalLogout,
   setCandidatePassword,
   updateOwnProfile,
   upsertExamProgressToDb,
@@ -34,6 +35,8 @@ import {
 } from "@/lib/storage";
 import type {
   AdminUser,
+  AuditUser,
+  BusinessUser,
   Candidate,
   DistrictStat,
   ExamProgress,
@@ -142,13 +145,21 @@ type IctStoreValue = {
     input: RegisterInput
   ) => Promise<{ ok: true; candidate: Candidate } | { ok: false; error: string }>;
   login: (
-    profileId: string,
+    email: string,
     password: string
   ) => Promise<
-    { ok: true } | { ok: false; error: string; needPasswordSetup?: boolean }
+    | { ok: true; kind?: "candidate" | "business" | "audit" }
+    | {
+        ok: false;
+        error: string;
+        needPasswordSetup?: boolean;
+        setupKind?: "candidate" | "business" | "audit";
+        loginEmailForSetup?: string;
+        profileIdForSetup?: string;
+      }
   >;
   completePasswordSetup: (
-    profileId: string,
+    email: string,
     phone: string,
     newPassword: string
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -157,7 +168,8 @@ type IctStoreValue = {
     password: string
   ) => Promise<{ ok: true; mustChangePassword: boolean } | { ok: false; error: string }>;
   refreshAdminSession: (admin: AdminUser) => void;
-  logout: () => void;
+  syncExecutiveUser: (user: BusinessUser | AuditUser) => void;
+  logout: (opts?: { redirect?: boolean }) => void;
   saveWatchProgress: (
     partial: Omit<WatchProgress, "candidate_id" | "last_updated">
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -278,7 +290,10 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       if (persisted.videos?.length) setVideos(persisted.videos);
       if (persisted.questions?.length) setQuestions(stripQuestionKeys(persisted.questions));
     }
-    setSession(readSession());
+    const existing = readSession();
+    setSession(existing);
+    // Re-sync access-role cookie so middleware can enforce path matrix
+    writeSession(existing);
     setHydrated(true);
     void refreshData();
   }, [refreshData]);
@@ -610,26 +625,45 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const login = useCallback(
-    async (profileId: string, password: string) => {
+    async (email: string, password: string) => {
       try {
-        const result = await loginCandidateWithPassword(profileId.trim(), password);
+        const result = await loginCandidateWithPassword(email.trim(), password);
         if (!result.ok) {
           return {
             ok: false as const,
             error: result.error,
             needPasswordSetup: result.needPasswordSetup,
+            setupKind: result.setupKind,
+            loginEmailForSetup: result.loginEmailForSetup,
+            profileIdForSetup: result.profileIdForSetup,
           };
+        }
+        if (result.kind === "business") {
+          persistSession({ kind: "business", user: result.user });
+          return { ok: true as const, kind: "business" as const };
+        }
+        if (result.kind === "audit") {
+          persistSession({ kind: "audit", user: result.user });
+          return { ok: true as const, kind: "audit" as const };
         }
         if (result.candidate.must_set_password) {
           return {
             ok: false as const,
             error: "กรุณาตั้งรหัสผ่านครั้งแรกก่อนเข้าใช้งาน",
             needPasswordSetup: true,
+            loginEmailForSetup: result.candidate.login_email || email.trim().toLowerCase(),
+            profileIdForSetup: result.candidate.id,
+          };
+        }
+        if (result.candidate.is_active === false) {
+          return {
+            ok: false as const,
+            error: "บัญชีถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ",
           };
         }
         persistSession({ kind: "candidate", candidate: result.candidate });
         setCandidates([result.candidate]);
-        return { ok: true as const };
+        return { ok: true as const, kind: "candidate" as const };
       } catch (err) {
         return {
           ok: false as const,
@@ -641,8 +675,8 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const completePasswordSetup = useCallback(
-    async (profileId: string, phone: string, newPassword: string) => {
-      const result = await setCandidatePassword(profileId, phone, newPassword);
+    async (email: string, phone: string, newPassword: string) => {
+      const result = await setCandidatePassword(email, phone, newPassword);
       if (!result.ok) return result;
       persistSession({ kind: "candidate", candidate: result.candidate });
       setCandidates([result.candidate]);
@@ -667,6 +701,19 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     [persistSession]
   );
 
+  const syncExecutiveUser = useCallback(
+    (user: BusinessUser | AuditUser) => {
+      if (session?.kind === "business") {
+        persistSession({ kind: "business", user });
+        return;
+      }
+      if (session?.kind === "audit" && "assigned_districts" in user) {
+        persistSession({ kind: "audit", user });
+      }
+    },
+    [persistSession, session]
+  );
+
   const refreshAdminSession = useCallback(
     (admin: AdminUser) => {
       if (session?.kind !== "admin") return;
@@ -675,15 +722,22 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     [persistSession, session]
   );
 
-  const logout = useCallback(() => {
-    if (session?.kind === "admin") {
-      void adminLogoutRpc(session.token);
-    }
-    persistSession(null);
-    if (typeof window !== "undefined") {
-      window.location.href = "/";
-    }
-  }, [persistSession, session]);
+  const logout = useCallback(
+    (opts?: { redirect?: boolean }) => {
+      const shouldRedirect = opts?.redirect !== false;
+      if (session?.kind === "admin") {
+        void adminLogoutRpc(session.token);
+      }
+      if (session?.kind === "candidate") {
+        void logPortalLogout(session.candidate.id, session.candidate.phone);
+      }
+      persistSession(null);
+      if (shouldRedirect && typeof window !== "undefined") {
+        window.location.href = "/";
+      }
+    },
+    [persistSession, session]
+  );
 
   const saveWatchProgress = useCallback(
     async (partial: Omit<WatchProgress, "candidate_id" | "last_updated">) => {
@@ -1014,6 +1068,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       completePasswordSetup,
       loginAdmin,
       refreshAdminSession,
+      syncExecutiveUser,
       logout,
       saveWatchProgress,
       saveExamDraft,
@@ -1056,6 +1111,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       projects,
       questions,
       refreshAdminSession,
+      syncExecutiveUser,
       refreshData,
       registerCandidate,
       saveExamDraft,

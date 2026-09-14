@@ -222,3 +222,36 @@ input[type="number"] {
   border-radius: 2px;
   animation: confettiFall 2.4s ease-in forwards;
 }
+
+/* Admin portal dark mode — solid backgrounds + readable white labels */
+.dark .admin-surface {
+  color: #ffffff;
+}
+
+.dark .admin-surface h1,
+.dark .admin-surface h2,
+.dark .admin-surface h3,
+.dark .admin-surface label,
+.dark .admin-surface th,
+.dark .admin-surface .admin-label {
+  color: #ffffff !important;
+}
+
+.dark nav.admin-nav-bar,
+.dark .admin-surface {
+  background-color: #020617; /* slate-950 */
+}
+
+.dark .admin-surface .bg-white,
+.dark .admin-surface .bg-gray-50,
+.dark .admin-surface .bg-slate-50,
+.dark .admin-surface .bg-slate-900 {
+  background-color: #000000 !important;
+}
+
+.dark .admin-surface .text-gray-500,
+.dark .admin-surface .text-gray-400,
+.dark .admin-surface .text-slate-400,
+.dark .admin-surface .text-slate-500 {
+  color: rgba(255, 255, 255, 0.85) !important;
+}

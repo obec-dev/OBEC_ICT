@@ -124,7 +124,7 @@ function ChangePasswordContent() {
         <button type="submit" disabled={submitting} className="w-full rounded-full bg-[var(--primary-blue)] text-white py-3 font-bold disabled:opacity-40">
           {submitting ? "กำลังบันทึก..." : "บันทึกรหัสผ่านใหม่"}
         </button>
-        <button type="button" onClick={logout} className="w-full text-sm text-gray-500 underline">
+        <button type="button" onClick={() => logout()} className="w-full text-sm text-gray-500 underline">
           ออกจากระบบ
         </button>
       </form>

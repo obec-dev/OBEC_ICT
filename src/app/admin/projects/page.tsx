@@ -45,8 +45,6 @@ function ProjectsManagementContent() {
     projects,
     videos,
     questions,
-    candidates,
-    examProgress,
     saveProject,
     saveProjectVideo,
     deleteProjectVideo,
@@ -119,10 +117,6 @@ function ProjectsManagementContent() {
   const projectQuestions = questions.filter((q) => q.project_id === selectedProjectId);
   const calculatedMaxScore = sumGradedMaxScore(projectQuestions, 0);
 
-  const projectExams = examProgress.filter(
-    (e) => e.project_id === selectedProjectId || (!e.project_id && selectedProjectId === projects[0]?.id)
-  );
-
   const showStatus = (msg: string, isErr = false) => {
     if (isErr) {
       setErrorMsg(msg);
@@ -143,102 +137,6 @@ function ProjectsManagementContent() {
       return Math.min(max, Math.max(0, Number.isFinite(value) ? value : 0));
     }
     return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 60));
-  };
-
-  // Export candidate exam data handlers
-  const handleExportCsv = () => {
-    if (projectExams.length === 0) {
-      showStatus("ไม่พบข้อมูลการทำข้อสอบสำหรับส่งออก", true);
-      return;
-    }
-    const headers = [
-      "Candidate ID",
-      "Full Name",
-      "School ID",
-      "School Name",
-      "Phone",
-      "Exam Status",
-      "Score",
-      "Passed",
-      "Graded At",
-      "Updated At",
-      ...projectQuestions.map((q, idx) => `Q${idx + 1} (${q.id})`),
-    ];
-
-    const rows = projectExams.map((e) => {
-      const cand = candidates.find((c) => c.id === e.candidate_id);
-      const candidateName = cand ? `${cand.first_name} ${cand.last_name}` : "N/A";
-      const schoolId = cand?.school_id || "N/A";
-      const schoolName = cand?.school_name || "N/A";
-      const phone = cand?.phone || "N/A";
-
-      const answers = e.answers || {};
-      const questionAnswers = projectQuestions.map((q) => {
-        const ans = answers[q.id] || "";
-        return `"${ans.replace(/"/g, '""')}"`;
-      });
-
-      return [
-        `"${e.candidate_id}"`,
-        `"${candidateName}"`,
-        `"${schoolId}"`,
-        `"${schoolName}"`,
-        `"${phone}"`,
-        `"${e.status}"`,
-        e.score ?? "-",
-        e.passed === undefined ? "-" : e.passed ? "PASSED" : "FAILED",
-        `"${e.graded_at || "-"}"`,
-        `"${e.updated_at || "-"}"`,
-        ...questionAnswers,
-      ].join(",");
-    });
-
-    const csvContentData = "\uFEFF" + [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csvContentData], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const timestamp = new Date().toISOString().slice(0, 10);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `exam_responses_${selectedProjectId}_${timestamp}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showStatus(`ส่งออกข้อมูลข้อสอบ (${projectExams.length} รายการ) เป็น CSV สำเร็จ`);
-  };
-
-  const handleExportJson = () => {
-    if (projectExams.length === 0) {
-      showStatus("ไม่พบข้อมูลการทำข้อสอบสำหรับส่งออก", true);
-      return;
-    }
-    const exportPayload = projectExams.map((e) => {
-      const cand = candidates.find((c) => c.id === e.candidate_id);
-      return {
-        candidate_id: e.candidate_id,
-        candidate_name: cand ? `${cand.first_name} ${cand.last_name}` : null,
-        school_id: cand?.school_id || null,
-        school_name: cand?.school_name || null,
-        phone: cand?.phone || null,
-        project_id: selectedProjectId,
-        exam_status: e.status,
-        score: e.score ?? null,
-        passed: e.passed ?? null,
-        graded_at: e.graded_at || null,
-        updated_at: e.updated_at,
-        answers: e.answers,
-      };
-    });
-
-    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const timestamp = new Date().toISOString().slice(0, 10);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `exam_responses_${selectedProjectId}_${timestamp}.json`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showStatus(`ส่งออกข้อมูลข้อสอบ (${projectExams.length} รายการ) เป็น JSON สำเร็จ`);
   };
 
   const persistProject = async (form: LearningProject, closeModal = false) => {
@@ -608,7 +506,7 @@ function ProjectsManagementContent() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-12 animate-fade-in-up">
+    <div className="max-w-6xl mx-auto px-4 py-12 animate-fade-in-up admin-surface">
       <AdminNav />
 
       {/* Header Banner */}
@@ -1180,20 +1078,6 @@ function ProjectsManagementContent() {
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={handleExportCsv}
-                        className="px-4 py-2.5 rounded-full bg-blue-600 text-white font-bold text-xs shadow hover:bg-blue-700"
-                      >
-                        📥 Export Answers (CSV)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleExportJson}
-                        className="px-4 py-2.5 rounded-full bg-indigo-600 text-white font-bold text-xs shadow hover:bg-indigo-700"
-                      >
-                        📥 Export Answers (JSON)
-                      </button>
                       <button
                         type="button"
                         disabled={isGrading}

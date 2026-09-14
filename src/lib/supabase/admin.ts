@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
-import type { AdminRole, AdminUser, Candidate } from "@/types/ict";
+import { parseDistrictIdList } from "@/lib/supabase/data";
+import type { AdminRole, AdminUser, Candidate, PortalRole } from "@/types/ict";
 
 function asObj(data: unknown): Record<string, unknown> {
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -302,6 +303,7 @@ export async function adminSearchProfiles(token: string, query: string, limit = 
     const p = asObj(item);
     const first = String(p.first_name ?? "");
     const last = String(p.last_name ?? "");
+    const role = (p.portal_role === "school_admin" ? "school_admin" : "user") as PortalRole;
     return {
       id: String(p.profile_id),
       school_id: String(p.school_id ?? ""),
@@ -310,8 +312,22 @@ export async function adminSearchProfiles(token: string, query: string, limit = 
       last_name: last,
       full_name: `${first} ${last}`.trim(),
       phone: String(p.phone ?? ""),
+      email: p.contact_email
+        ? String(p.contact_email)
+        : p.email
+          ? String(p.email)
+          : undefined,
+      contact_email: p.contact_email
+        ? String(p.contact_email)
+        : p.email
+          ? String(p.email)
+          : undefined,
+      login_email: p.login_email ? String(p.login_email) : undefined,
       remark: p.remark ? String(p.remark) : undefined,
-      is_school_admin: Boolean(p.is_school_admin),
+      is_school_admin: Boolean(p.is_school_admin) || role === "school_admin",
+      portal_role: role,
+      is_active: p.is_active !== false,
+      deleted_at: p.deleted_at ? String(p.deleted_at) : null,
       created_at: p.created_at ? String(p.created_at) : new Date().toISOString(),
     };
   });
@@ -540,4 +556,429 @@ export async function adminListPurgeHistory(token: string): Promise<AuditPurgeHi
       created_at: String(r.created_at),
     };
   });
+}
+
+function mapAdminUserRow(item: unknown): Candidate {
+  const p = asObj(item);
+  const first = String(p.first_name ?? "");
+  const last = String(p.last_name ?? "");
+  const role = (p.portal_role === "school_admin" ? "school_admin" : "user") as PortalRole;
+  return {
+    id: String(p.profile_id),
+    school_id: String(p.school_id ?? ""),
+    school_name: p.school_name ? String(p.school_name) : undefined,
+    first_name: first,
+    last_name: last,
+    full_name: `${first} ${last}`.trim(),
+    phone: String(p.phone ?? ""),
+    email: p.contact_email
+      ? String(p.contact_email)
+      : p.email
+        ? String(p.email)
+        : undefined,
+    contact_email: p.contact_email
+      ? String(p.contact_email)
+      : p.email
+        ? String(p.email)
+        : undefined,
+    login_email: p.login_email ? String(p.login_email) : undefined,
+    remark: p.remark ? String(p.remark) : undefined,
+    is_school_admin: Boolean(p.is_school_admin) || role === "school_admin",
+    portal_role: role,
+    is_active: p.is_active !== false,
+    deleted_at: p.deleted_at ? String(p.deleted_at) : null,
+    position: p.position ? String(p.position) : undefined,
+    title_th: p.title_th ? String(p.title_th) : undefined,
+    title_other_th: p.title_other_th ? String(p.title_other_th) : undefined,
+    created_at: p.created_at ? String(p.created_at) : new Date().toISOString(),
+  };
+}
+
+export async function adminSearchUsers(
+  token: string,
+  query: string,
+  limit = 50,
+  includeDeleted = false
+): Promise<Candidate[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_search_users", {
+    p_token: token,
+    p_query: query.trim(),
+    p_limit: limit,
+    p_include_deleted: includeDeleted,
+  });
+  if (error) throw adminRpcFail(error);
+  if (!Array.isArray(data)) return [];
+  return data.map(mapAdminUserRow);
+}
+
+export async function adminSetPortalRoleRpc(
+  token: string,
+  profileId: string,
+  role: PortalRole,
+  assignedDistrictId?: string | null
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_set_portal_role", {
+    p_token: token,
+    p_profile_id: profileId,
+    p_role: role,
+    p_assigned_district_id: assignedDistrictId ?? null,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "เปลี่ยนบทบาทไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminUpdateLoginEmailRpc(token: string, profileId: string, email: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_update_login_email", {
+    p_token: token,
+    p_profile_id: profileId,
+    p_email: email.trim().toLowerCase(),
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "อัปเดตอีเมลไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminSetUserActiveRpc(token: string, profileId: string, isActive: boolean) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_set_user_active", {
+    p_token: token,
+    p_profile_id: profileId,
+    p_is_active: isActive,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "อัปเดตสถานะไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminSoftDeleteUserRpc(token: string, profileId: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_soft_delete_user", {
+    p_token: token,
+    p_profile_id: profileId,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "ลบไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminRestoreUserRpc(token: string, profileId: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_restore_user", {
+    p_token: token,
+    p_profile_id: profileId,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "กู้คืนไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminCreateSpecialUserRpc(
+  token: string,
+  input: {
+    profile_id: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    phone: string;
+    role: "business_user" | "audit_user";
+    temp_password: string;
+    title_th?: string;
+    position?: string;
+    assigned_district_id?: string;
+    school_id?: string;
+  }
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_create_special_user", {
+    p_token: token,
+    p_profile_id: input.profile_id,
+    p_email: input.email,
+    p_first_name: input.first_name,
+    p_last_name: input.last_name,
+    p_phone: input.phone,
+    p_role: input.role,
+    p_temp_password: input.temp_password,
+    p_title_th: input.title_th ?? null,
+    p_position: input.position ?? null,
+    p_assigned_district_id: input.assigned_district_id ?? null,
+    p_school_id: input.school_id ?? null,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "สร้างผู้ใช้ไม่สำเร็จ") };
+  return {
+    ok: true as const,
+    temp_password: String(row.temp_password ?? input.temp_password),
+  };
+}
+
+export async function adminExportExamResponsesRpc(token: string, projectId: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_export_exam_responses", {
+    p_token: token,
+    p_project_id: projectId,
+  });
+  if (error) throw adminRpcFail(error);
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => {
+    const r = asObj(item);
+    return {
+      profile_id: String(r.profile_id ?? ""),
+      first_name: String(r.first_name ?? ""),
+      last_name: String(r.last_name ?? ""),
+      full_name: String(r.full_name ?? "").trim() || "N/A",
+      school_id: String(r.school_id ?? "") || "N/A",
+      school_name: String(r.school_name ?? "") || "N/A",
+      phone: String(r.phone ?? "") || "N/A",
+      email: r.email ? String(r.email) : "",
+      project_id: r.project_id ? String(r.project_id) : undefined,
+      answers: (r.answers as Record<string, string>) || {},
+      status: r.status === "submitted" ? ("submitted" as const) : ("draft" as const),
+      score: r.score != null ? Number(r.score) : undefined,
+      passed: typeof r.passed === "boolean" ? r.passed : undefined,
+      graded_at: r.graded_at ? String(r.graded_at) : undefined,
+      updated_at: r.updated_at ? String(r.updated_at) : new Date().toISOString(),
+    };
+  });
+}
+
+export async function adminExportHierarchyRpc(token: string, mode: "district" | "partner") {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_export_hierarchy", {
+    p_token: token,
+    p_mode: mode,
+  });
+  if (error) throw adminRpcFail(error);
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => asObj(item));
+}
+
+export async function adminMissionProgressStats(token: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_mission_progress_stats", { p_token: token });
+  if (error) throw adminRpcFail(error);
+  const row = asObj(data);
+  return {
+    total_missions: Number(row.total_missions) || 0,
+    total_users: Number(row.total_users) || 0,
+    completed_pairs: Number(row.completed_pairs) || 0,
+    avg_completed_per_user: Number(row.avg_completed_per_user) || 0,
+  };
+}
+
+export type ExecutiveUserRow = {
+  id: string;
+  kind: "business" | "audit";
+  login_email: string;
+  display_name: string;
+  position?: string | null;
+  assigned_districts?: string[];
+  is_active?: boolean;
+  must_set_password?: boolean;
+  /** Plaintext temp password while must_set_password — admin display only */
+  pending_temp_password?: string | null;
+  deleted_at?: string | null;
+  created_at?: string;
+};
+
+export async function adminListExecutiveUsers(
+  token: string,
+  includeDeleted = false
+): Promise<{
+  business: ExecutiveUserRow[];
+  audit: ExecutiveUserRow[];
+}> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_executive_users", {
+    p_token: token,
+    p_kind: "all",
+    p_include_deleted: includeDeleted,
+  });
+  if (error) throw adminRpcFail(error);
+  const row = asObj(data);
+  const mapRow = (item: unknown, kind: "business" | "audit"): ExecutiveUserRow => {
+    const r = asObj(item);
+    const districts = parseDistrictIdList(r.assigned_districts);
+    return {
+      id: String(r.id),
+      kind,
+      login_email: String(r.login_email ?? ""),
+      display_name: String(r.display_name ?? ""),
+      position: r.position == null ? null : String(r.position),
+      assigned_districts: districts,
+      is_active: r.is_active !== false,
+      must_set_password: Boolean(r.must_set_password),
+      pending_temp_password:
+        r.pending_temp_password && r.must_set_password
+          ? String(r.pending_temp_password)
+          : null,
+      deleted_at: r.deleted_at ? String(r.deleted_at) : null,
+      created_at: r.created_at ? String(r.created_at) : undefined,
+    };
+  };
+  return {
+    business: Array.isArray(row.business)
+      ? row.business.map((i) => mapRow(i, "business"))
+      : [],
+    audit: Array.isArray(row.audit) ? row.audit.map((i) => mapRow(i, "audit")) : [],
+  };
+}
+
+export async function adminUpsertBusinessUserRpc(
+  token: string,
+  input: {
+    login_email: string;
+    display_name: string;
+    position?: string;
+    temp_password?: string;
+    id?: string;
+  }
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_upsert_business_user", {
+    p_token: token,
+    p_login_email: input.login_email,
+    p_display_name: input.display_name,
+    p_position: input.position ?? null,
+    p_temp_password: input.temp_password ?? null,
+    p_id: input.id ?? null,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกไม่สำเร็จ") };
+  return {
+    ok: true as const,
+    id: String(row.id),
+    temp_password: row.temp_password ? String(row.temp_password) : undefined,
+  };
+}
+
+export async function adminUpsertAuditUserRpc(
+  token: string,
+  input: {
+    login_email: string;
+    display_name: string;
+    position?: string;
+    assigned_districts: string[];
+    temp_password?: string;
+    id?: string;
+  }
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_upsert_audit_user", {
+    p_token: token,
+    p_login_email: input.login_email,
+    p_display_name: input.display_name,
+    p_position: input.position ?? null,
+    p_assigned_districts: input.assigned_districts,
+    p_temp_password: input.temp_password ?? null,
+    p_id: input.id ?? null,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกไม่สำเร็จ") };
+  return {
+    ok: true as const,
+    id: String(row.id),
+    temp_password: row.temp_password ? String(row.temp_password) : undefined,
+  };
+}
+
+export async function adminSetAuditDistrictsRpc(
+  token: string,
+  id: string,
+  districts: string[]
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_set_audit_districts", {
+    p_token: token,
+    p_id: id,
+    p_assigned_districts: districts,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกไม่สำเร็จ") };
+  const saved = parseDistrictIdList(row.assigned_districts);
+  return { ok: true as const, assigned_districts: saved.length ? saved : districts };
+}
+
+export async function adminSetExecutiveActiveRpc(
+  token: string,
+  kind: "business" | "audit",
+  id: string,
+  isActive: boolean
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_set_executive_active", {
+    p_token: token,
+    p_kind: kind,
+    p_id: id,
+    p_is_active: isActive,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "อัปเดตสถานะไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminSoftDeleteExecutiveRpc(
+  token: string,
+  kind: "business" | "audit",
+  id: string
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_soft_delete_executive", {
+    p_token: token,
+    p_kind: kind,
+    p_id: id,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "ลบไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminRestoreExecutiveRpc(
+  token: string,
+  kind: "business" | "audit",
+  id: string
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_restore_executive", {
+    p_token: token,
+    p_kind: kind,
+    p_id: id,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "กู้คืนไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminResetExecutiveTempPasswordRpc(
+  token: string,
+  kind: "business" | "audit",
+  id: string,
+  tempPassword?: string
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_reset_executive_temp_password", {
+    p_token: token,
+    p_kind: kind,
+    p_id: id,
+    p_temp_password: tempPassword ?? null,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "รีเซ็ตรหัสผ่านไม่สำเร็จ") };
+  return { ok: true as const, temp_password: String(row.temp_password ?? "") };
 }

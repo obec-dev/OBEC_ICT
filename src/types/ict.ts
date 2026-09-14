@@ -1,3 +1,24 @@
+export type PortalRole = "user" | "school_admin";
+
+export type ExecutiveKind = "business" | "audit";
+
+export type BusinessUser = {
+  id: string;
+  login_email: string;
+  display_name: string;
+  position?: string | null;
+  must_set_password?: boolean;
+};
+
+export type AuditUser = {
+  id: string;
+  login_email: string;
+  display_name: string;
+  position?: string | null;
+  assigned_districts: string[];
+  must_set_password?: boolean;
+};
+
 export type School = {
   school_id: string;
   school_name: string;
@@ -5,6 +26,8 @@ export type School = {
   province: string;
   is_registered: boolean;
   district_id?: string;
+  /** Partner network label (optional) */
+  partner?: string | null;
   /** Number of registered candidates (profiles) at this school */
   registered_count?: number;
   school_director_name?: string | null;
@@ -52,14 +75,42 @@ export type Candidate = {
   position?: string;
   duty?: string;
   line_id?: string;
+  /** @deprecated Prefer contact_email — kept for legacy UI bindings */
   email?: string;
+  /** Personal contact email (candidate-editable) */
+  contact_email?: string;
+  /** Login ID email (admin-only change; used for authentication) */
+  login_email?: string;
   /** Designated school data manager (one per school) */
   is_school_admin?: boolean;
+  /** Portal access role for candidates only */
+  portal_role?: PortalRole;
+  /** Suspended accounts cannot log in */
+  is_active?: boolean;
+  /** Soft-delete timestamp (hidden from standard views) */
+  deleted_at?: string | null;
   /** Must complete password setup before portal access */
   must_set_password?: boolean;
   ict_talent_cohort?: string;
   ict_survey?: Record<string, unknown>;
   created_at: string;
+};
+
+export type MissionValidationType = "url_submission" | "exam_completion" | "manual";
+
+export type Mission = {
+  id: string;
+  title: string;
+  description?: string | null;
+  sequence_order: number;
+  validation_type: MissionValidationType;
+  is_active?: boolean;
+};
+
+export type UserMissionProgress = Mission & {
+  status: "pending" | "completed";
+  submitted_data?: Record<string, unknown>;
+  completed_at?: string | null;
 };
 
 export type SchoolProfile = {
@@ -174,7 +225,9 @@ export type AdminUser = {
 
 export type SessionUser =
   | { kind: "candidate"; candidate: Candidate }
-  | { kind: "admin"; admin: AdminUser; token: string };
+  | { kind: "admin"; admin: AdminUser; token: string }
+  | { kind: "business"; user: BusinessUser }
+  | { kind: "audit"; user: AuditUser };
 
 export type IctPersistedState = {
   watchProgress: WatchProgress[];

@@ -241,13 +241,18 @@ function PersonalProfileForm({ candidate }: { candidate: Candidate }) {
           <input className={inputClass} value={lineId} onChange={(e) => setLineId(e.target.value)} />
         </div>
         <div>
-          <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">Email</label>
+          <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+            อีเมลติดต่อ (Contact Email)
+          </label>
           <input
             type="email"
             className={inputClass}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
+          <p className="text-xs text-gray-400 mt-1">
+            แก้ไขได้เอง — Login ID เปลี่ยนได้เฉพาะผู้ดูแลระบบ
+          </p>
         </div>
       </div>
 
@@ -283,33 +288,37 @@ function SchoolProfileForm({ candidate }: { candidate: Candidate }) {
   const [directorName, setDirectorName] = useState("");
   const [directorPosition, setDirectorPosition] = useState("");
   const [schoolName, setSchoolName] = useState(candidate.school_name || "");
-  const [loading, setLoading] = useState(true);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const loadKey = `${candidate.id}:${candidate.phone}`;
+  const loading = loadedKey !== loadKey;
+  const [seenKey, setSeenKey] = useState(loadKey);
+  if (seenKey !== loadKey) {
+    setSeenKey(loadKey);
+    setError("");
+  }
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError("");
     void getSchoolProfileForAdmin(candidate.id, candidate.phone)
       .then((school) => {
         if (cancelled) return;
         setSchoolName(String(school.school_name ?? candidate.school_name ?? ""));
         setDirectorName(String(school.school_director_name ?? ""));
         setDirectorPosition(String(school.school_director_position ?? ""));
+        setLoadedKey(loadKey);
       })
       .catch((err) => {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "โหลดข้อมูลสถานศึกษาไม่สำเร็จ");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        setLoadedKey(loadKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [candidate.id, candidate.phone, candidate.school_name]);
+  }, [candidate.id, candidate.phone, candidate.school_name, loadKey]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -400,20 +409,11 @@ function SchoolProfileForm({ candidate }: { candidate: Candidate }) {
 }
 
 function ProfileForm({ candidate }: { candidate: Candidate }) {
-  const isSchoolAdmin = Boolean(candidate.is_school_admin);
+  const isSchoolAdmin =
+    Boolean(candidate.is_school_admin) || candidate.portal_role === "school_admin";
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const [tab, setTab] = useState<"personal" | "school">(
-    isSchoolAdmin && tabParam === "school" ? "school" : "personal"
-  );
-
-  useEffect(() => {
-    if (!isSchoolAdmin) {
-      setTab("personal");
-      return;
-    }
-    setTab(tabParam === "school" ? "school" : "personal");
-  }, [isSchoolAdmin, tabParam]);
+  const tab = isSchoolAdmin && tabParam === "school" ? "school" : "personal";
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-12 animate-fade-in-up">
@@ -444,7 +444,6 @@ function ProfileForm({ candidate }: { candidate: Candidate }) {
           <div className="flex gap-2 mb-6 border-b border-gray-100 dark:border-[var(--border-soft)]">
             <Link
               href="/portal/profile?tab=personal"
-              onClick={() => setTab("personal")}
               className={`px-4 py-2.5 text-sm font-bold border-b-2 transition-colors ${
                 tab === "personal"
                   ? "border-[var(--primary-blue)] text-[var(--primary-blue)]"
@@ -454,8 +453,7 @@ function ProfileForm({ candidate }: { candidate: Candidate }) {
               ข้อมูลส่วนตัว
             </Link>
             <Link
-              href="/portal/profile?tab=school"
-              onClick={() => setTab("school")}
+              href="/portal/school-profile"
               className={`px-4 py-2.5 text-sm font-bold border-b-2 transition-colors ${
                 tab === "school"
                   ? "border-[var(--primary-blue)] text-[var(--primary-blue)]"
@@ -502,7 +500,7 @@ function ProfilePageContent() {
 
 export default function ProfilePage() {
   return (
-    <AuthGuard>
+    <AuthGuard requirePortalRoles={["user", "school_admin"]}>
       <Suspense fallback={<div className="max-w-3xl mx-auto px-4 py-12 text-gray-500 dark:text-slate-400">กำลังโหลด...</div>}>
         <ProfilePageContent />
       </Suspense>

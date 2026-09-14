@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ProjectCoverFlow } from "@/app/components/ProjectCoverFlow";
 import { ProjectScheduleNotice } from "@/app/components/ProjectScheduleNotice";
 import { useIctStore, useSchoolStats } from "@/contexts/IctStore";
+import { ctaForSession } from "@/lib/auth/access";
 import {
   fetchPublicSiteSettings,
   getAnyProjectRegistrationStatus,
@@ -91,10 +92,10 @@ export default function Home() {
             <div className="flex flex-col sm:flex-row gap-4 pt-4 justify-center md:flex-wrap md:justify-start">
               {hydrated && session ? (
                 <Link
-                  href={session.kind === "admin" ? "/admin" : "/portal/profile"}
+                  href={ctaForSession(session).href}
                   className="bg-[var(--accent-green)] text-white px-8 py-4 rounded-full text-lg font-bold hover:bg-green-600 transition-all duration-300 shadow-xl hover:shadow-green-900/50 hover:-translate-y-1 active:translate-y-0 flex items-center justify-center gap-2"
                 >
-                  {session.kind === "admin" ? "เข้าสู่ศูนย์ผู้ดูแล" : "จัดการโปรไฟล์"}
+                  {ctaForSession(session).label}
                 </Link>
               ) : regStatus && !regStatus.open ? (
                 <span className="bg-white/15 text-white/80 px-8 py-4 rounded-full text-lg font-bold flex items-center justify-center gap-2 cursor-not-allowed">

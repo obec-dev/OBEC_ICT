@@ -1,4 +1,5 @@
 import type { IctPersistedState, SessionUser } from "@/types/ict";
+import { syncAccessRoleCookie } from "@/lib/auth/access";
 
 export const STORAGE_KEYS = {
   state: "ict_platform_state",
@@ -38,7 +39,9 @@ export function writeSession(session: SessionUser | null) {
   if (typeof window === "undefined") return;
   if (!session) {
     localStorage.removeItem(STORAGE_KEYS.session);
+    syncAccessRoleCookie(null);
     return;
   }
   writeJson(STORAGE_KEYS.session, session);
+  syncAccessRoleCookie(session);
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { useIctStore } from "@/contexts/IctStore";
@@ -17,15 +17,34 @@ import { STORAGE_KEYS } from "@/lib/storage";
 import { getProjectRegistrationStatus, getSiteProject } from "@/lib/siteSettings";
 import { disabledInputClass, inputClass } from "@/lib/styles";
 import {
-  ENG_NAME_RE,
-  THAI_NAME_RE,
   TITLE_OPTIONS,
   filterEnglishOnly,
   filterThaiOnly,
   getTitleByKey,
   type TitleKey,
 } from "@/lib/titles";
+import {
+  collectPersonErrors,
+  fieldId,
+  filterPhoneInput,
+  scrollToInvalidField,
+  validatePersonField,
+  type PersonField,
+} from "@/lib/registerFormValidation";
 import type { School } from "@/types/ict";
+
+function RequiredMark() {
+  return <span className="text-red-500"> *</span>;
+}
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p className="mt-1.5 text-sm text-[var(--accent-red)]" role="alert">
+      {message}
+    </p>
+  );
+}
 
 type PersonDraft = {
   key: string;
@@ -131,7 +150,10 @@ export default function RegisterFormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [lookingUp, setLookingUp] = useState(false);
   const [persons, setPersons] = useState<PersonDraft[]>([emptyPerson()]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [periodLoading, setPeriodLoading] = useState(true);
+  const personsRef = useRef(persons);
+  personsRef.current = persons;
 
   const siteProject = getSiteProject(projects);
   const registrationOpen = siteProject ? getProjectRegistrationStatus(siteProject).open : false;
@@ -151,6 +173,7 @@ export default function RegisterFormPage() {
     setMatched(null);
     setCodeError("");
     setFormError("");
+    setFieldErrors({});
     setPersons([emptyPerson()]);
   };
 
@@ -181,8 +204,33 @@ export default function RegisterFormPage() {
     }
   };
 
+  const clearPersonFieldErrors = (key: string, fields: string[]) => {
+    setFieldErrors((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const field of fields) {
+        const id = fieldId(key, field);
+        if (next[id]) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  };
+
   const updatePerson = (key: string, patch: Partial<PersonDraft>) => {
     setPersons((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
+    const fields = Object.keys(patch);
+    if ("ict_survey" in patch) {
+      fields.push(
+        ...Object.keys(patch.ict_survey ?? {}).map((surveyKey) => `survey:${surveyKey}`)
+      );
+    }
+    if ("birth_day" in patch || "birth_month" in patch || "birth_year" in patch) {
+      fields.push("birth_day", "birth_month", "birth_year");
+    }
+    clearPersonFieldErrors(key, fields);
   };
 
   const setSchoolAdmin = (personKey: string, value: boolean) => {
@@ -192,6 +240,17 @@ export default function RegisterFormPage() {
         is_school_admin: p.key === personKey ? value : value ? false : p.is_school_admin,
       }))
     );
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const key of Object.keys(next)) {
+        if (key.endsWith(":is_school_admin")) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
   };
 
   const setLinkedTitle = (personKey: string, titleKey: TitleKey | "") => {
@@ -229,6 +288,7 @@ export default function RegisterFormPage() {
         };
       })
     );
+    clearPersonFieldErrors(personKey, [`survey:${domainKey}`]);
   };
 
   const addPerson = () => {
@@ -237,87 +297,34 @@ export default function RegisterFormPage() {
 
   const removePerson = (key: string) => {
     setPersons((prev) => (prev.length <= 1 ? prev : prev.filter((p) => p.key !== key)));
+    setFieldErrors((prev) => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => !id.startsWith(`${key}:`)));
+      return next;
+    });
   };
 
-  const validatePersons = (): string | null => {
-    const ids = new Set<string>();
-    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const schoolAdminCount = persons.filter((p) => p.is_school_admin === true).length;
-    if (schoolAdminCount > 1) {
-      return "ระบุผู้จัดการข้อมูลสถานศึกษาได้เพียง 1 คนต่อครั้งการลงทะเบียน";
-    }
+  const err = (personKey: string, field: string) => fieldErrors[fieldId(personKey, field)];
 
-    for (let i = 0; i < persons.length; i++) {
-      const p = persons[i];
-      const label = `คนที่ ${i + 1}`;
-
-      if (p.is_school_admin === null) {
-        return `${label}: กรุณาเลือกว่าท่านเป็นผู้ได้รับมอบหมายให้จัดการข้อมูลสถานศึกษาหรือไม่`;
+  const handleFieldBlur = (event: React.FocusEvent<HTMLFormElement>) => {
+    const host = (event.target as HTMLElement).closest("[data-field]");
+    const id = host?.getAttribute("data-field");
+    if (!id || id === "school-code") return;
+    const sep = id.indexOf(":");
+    if (sep < 0) return;
+    const personKey = id.slice(0, sep);
+    const field = id.slice(sep + 1) as PersonField;
+    const person = personsRef.current.find((p) => p.key === personKey);
+    if (!person) return;
+    const message = validatePersonField(person, field, personsRef.current);
+    setFieldErrors((prev) => {
+      if (!message) {
+        if (!prev[id]) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
       }
-      if (!/^\d{13}$/.test(p.profile_id.trim())) {
-        return `${label}: เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก`;
-      }
-      if (!p.title_key) {
-        return `${label}: กรุณาเลือกคำนำหน้าชื่อ`;
-      }
-      const title = getTitleByKey(p.title_key);
-      if (!title) return `${label}: คำนำหน้าชื่อไม่ถูกต้อง`;
-      if (p.title_key === "other") {
-        if (!p.title_other_en.trim() || !p.title_other_th.trim()) {
-          return `${label}: กรุณากรอกคำนำหน้าชื่อ (Other / อื่นๆ) ทั้งภาษาอังกฤษและไทย`;
-        }
-      }
-      if (!p.first_name.trim() || !THAI_NAME_RE.test(p.first_name.trim())) {
-        return `${label}: ชื่อไทยต้องเป็นตัวอักษรภาษาไทยเท่านั้น`;
-      }
-      if (!p.last_name.trim() || !THAI_NAME_RE.test(p.last_name.trim())) {
-        return `${label}: นามสกุลไทยต้องเป็นตัวอักษรภาษาไทยเท่านั้น`;
-      }
-      if (!p.eng_first_name.trim() || !ENG_NAME_RE.test(p.eng_first_name.trim())) {
-        return `${label}: Eng name ต้องเป็นตัวอักษรภาษาอังกฤษเท่านั้น`;
-      }
-      if (!p.eng_last_name.trim() || !ENG_NAME_RE.test(p.eng_last_name.trim())) {
-        return `${label}: Eng surname ต้องเป็นตัวอักษรภาษาอังกฤษเท่านั้น`;
-      }
-      if (!p.gender) {
-        return `${label}: กรุณาเลือกเพศ`;
-      }
-      const birth = buildBirthDate(p.birth_day, p.birth_month, p.birth_year);
-      if (!birth) {
-        return `${label}: กรุณาเลือกวัน เดือน ปีเกิดให้ถูกต้อง`;
-      }
-      if (!p.phone.trim()) {
-        return `${label}: กรุณากรอกเบอร์โทรศัพท์`;
-      }
-      if (!p.line_id.trim()) {
-        return `${label}: กรุณากรอก Line ID`;
-      }
-      if (!p.email.trim() || !emailRe.test(p.email.trim())) {
-        return `${label}: กรุณากรอกอีเมลให้ถูกต้อง`;
-      }
-      if (!p.position.trim() || !(POSITION_OPTIONS as readonly string[]).includes(p.position.trim())) {
-        return `${label}: กรุณาเลือกตำแหน่ง`;
-      }
-      if (!p.ict_talent_cohort) {
-        return `${label}: กรุณาเลือกประวัติ ICT Talent`;
-      }
-      for (const section of ICT_SURVEY_SECTIONS) {
-        const selected = p.ict_survey[section.key];
-        if (!selected.length) {
-          return "มีคำถามที่ยังไม่ได้ตอบ กรุณาตรวจสอบอีกครั้ง";
-        }
-      }
-      if (!Array.isArray(p.ict_survey.sms_usage) || p.ict_survey.sms_usage.length === 0) {
-        return "มีคำถามที่ยังไม่ได้ตอบ กรุณาตรวจสอบอีกครั้ง";
-      }
-
-      const id = p.profile_id.trim();
-      if (ids.has(id)) {
-        return `เลขบัตรประชาชน ${id} ซ้ำในฟอร์ม`;
-      }
-      ids.add(id);
-    }
-    return null;
+      return { ...prev, [id]: message };
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -336,14 +343,18 @@ export default function RegisterFormPage() {
 
     if (!matched) {
       setFormError("กรุณาตรวจสอบรหัสโรงเรียนก่อนกรอกข้อมูลผู้สมัคร");
+      scrollToInvalidField("school-code");
       return;
     }
 
-    const validationError = validatePersons();
-    if (validationError) {
-      setFormError(validationError);
+    const { errors, firstField } = collectPersonErrors(persons);
+    if (firstField) {
+      setFieldErrors(errors);
+      setFormError("กรุณาตรวจสอบข้อมูลที่ทำเครื่องหมายไว้");
+      window.setTimeout(() => scrollToInvalidField(firstField), 0);
       return;
     }
+    setFieldErrors({});
 
     setSubmitting(true);
     const failures: string[] = [];
@@ -435,7 +446,12 @@ export default function RegisterFormPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-12 animate-fade-in-up">
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form
+        noValidate
+        onSubmit={handleSubmit}
+        onBlur={handleFieldBlur}
+        className="space-y-6 [&_[data-invalid=true]_input]:border-red-400 [&_[data-invalid=true]_select]:border-red-400"
+      >
         <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
           <div className="bg-[var(--primary-blue)] px-8 py-6 text-white">
             <h1 className="text-2xl font-bold">แบบฟอร์มลงทะเบียน</h1>
@@ -445,11 +461,6 @@ export default function RegisterFormPage() {
           </div>
 
           <div className="p-8 space-y-6">
-            <div className="p-5 rounded-2xl bg-blue-50/70 border border-blue-100">
-              <p className="text-sm font-bold text-[var(--primary-blue)] mb-1">📚 โครงการที่เปิดรับสมัคร</p>
-              <p className="text-base font-extrabold text-gray-800">{siteProject.name}</p>
-            </div>
-
             <div className="flex items-center gap-2 text-sm font-semibold text-[var(--primary-blue)]">
               <span className="inline-flex size-6 items-center justify-center rounded-full bg-[var(--primary-blue)] text-white text-xs">
                 1
@@ -458,8 +469,11 @@ export default function RegisterFormPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1">
-                <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">รหัสโรงเรียน</label>
+              <div className="flex-1" data-field="school-code">
+                <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                  รหัสโรงเรียน
+                  <RequiredMark />
+                </label>
                 <input
                   className={inputClass}
                   value={code}
@@ -562,10 +576,13 @@ export default function RegisterFormPage() {
                   </div>
 
                   <div className="p-6 space-y-4">
-                    <div>
+                    <div
+                      data-field={fieldId(person.key, "is_school_admin")}
+                      data-invalid={err(person.key, "is_school_admin") ? "true" : undefined}
+                    >
                       <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                        ท่านเป็นผู้ได้รับมอบหมายให้จัดการข้อมูลสถานศึกษาหรือไม่?{" "}
-                        <span className="text-red-500">*</span>
+                        ท่านเป็นผู้ได้รับมอบหมายให้จัดการข้อมูลสถานศึกษาหรือไม่?
+                        <RequiredMark />
                       </label>
                       <div className="flex flex-wrap gap-4">
                         <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
@@ -589,11 +606,16 @@ export default function RegisterFormPage() {
                           ไม่ใช่
                         </label>
                       </div>
+                      <FieldError message={err(person.key, "is_school_admin")} />
                     </div>
 
-                    <div>
+                    <div
+                      data-field={fieldId(person.key, "profile_id")}
+                      data-invalid={err(person.key, "profile_id") ? "true" : undefined}
+                    >
                       <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                         เลขบัตรประชาชน
+                        <RequiredMark />
                       </label>
                       <input
                         className={inputClass}
@@ -608,11 +630,16 @@ export default function RegisterFormPage() {
                           })
                         }
                       />
+                      <FieldError message={err(person.key, "profile_id")} />
                     </div>
 
-                    <div>
+                    <div
+                      data-field={fieldId(person.key, "title_key")}
+                      data-invalid={err(person.key, "title_key") ? "true" : undefined}
+                    >
                       <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                         คำนำหน้า
+                        <RequiredMark />
                       </label>
                       <select
                         className={inputClass}
@@ -628,13 +655,18 @@ export default function RegisterFormPage() {
                           </option>
                         ))}
                       </select>
+                      <FieldError message={err(person.key, "title_key")} />
                     </div>
 
                     {isOther && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
+                        <div
+                          data-field={fieldId(person.key, "title_other_th")}
+                          data-invalid={err(person.key, "title_other_th") ? "true" : undefined}
+                        >
                           <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                             คำนำหน้าอื่นๆ (TH)
+                            <RequiredMark />
                           </label>
                           <input
                             className={inputClass}
@@ -648,10 +680,15 @@ export default function RegisterFormPage() {
                               })
                             }
                           />
+                          <FieldError message={err(person.key, "title_other_th")} />
                         </div>
-                        <div>
+                        <div
+                          data-field={fieldId(person.key, "title_other_en")}
+                          data-invalid={err(person.key, "title_other_en") ? "true" : undefined}
+                        >
                           <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                             Other title (EN)
+                            <RequiredMark />
                           </label>
                           <input
                             className={inputClass}
@@ -665,14 +702,19 @@ export default function RegisterFormPage() {
                               })
                             }
                           />
+                          <FieldError message={err(person.key, "title_other_en")} />
                         </div>
                       </div>
                     )}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
+                      <div
+                        data-field={fieldId(person.key, "first_name")}
+                        data-invalid={err(person.key, "first_name") ? "true" : undefined}
+                      >
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                           ชื่อ (ภาษาไทย)
+                          <RequiredMark />
                         </label>
                         <input
                           className={inputClass}
@@ -685,10 +727,15 @@ export default function RegisterFormPage() {
                             updatePerson(person.key, { first_name: filterThaiOnly(e.target.value) })
                           }
                         />
+                        <FieldError message={err(person.key, "first_name")} />
                       </div>
-                      <div>
+                      <div
+                        data-field={fieldId(person.key, "last_name")}
+                        data-invalid={err(person.key, "last_name") ? "true" : undefined}
+                      >
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                           นามสกุล (ภาษาไทย)
+                          <RequiredMark />
                         </label>
                         <input
                           className={inputClass}
@@ -701,13 +748,18 @@ export default function RegisterFormPage() {
                             updatePerson(person.key, { last_name: filterThaiOnly(e.target.value) })
                           }
                         />
+                        <FieldError message={err(person.key, "last_name")} />
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
+                      <div
+                        data-field={fieldId(person.key, "eng_first_name")}
+                        data-invalid={err(person.key, "eng_first_name") ? "true" : undefined}
+                      >
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                         ชื่อ (ภาษาอังกฤษ)
+                        <RequiredMark />
                         </label>
                         <input
                           className={inputClass}
@@ -721,10 +773,15 @@ export default function RegisterFormPage() {
                             updatePerson(person.key, { eng_first_name: filterEnglishOnly(e.target.value) })
                           }
                         />
+                        <FieldError message={err(person.key, "eng_first_name")} />
                       </div>
-                      <div>
+                      <div
+                        data-field={fieldId(person.key, "eng_last_name")}
+                        data-invalid={err(person.key, "eng_last_name") ? "true" : undefined}
+                      >
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                         นามสกุล (ภาษาอังกฤษ)
+                        นามสกุล (ภาษาอังกฤษ)
+                        <RequiredMark />
                         </label>
                         <input
                           className={inputClass}
@@ -738,11 +795,18 @@ export default function RegisterFormPage() {
                             updatePerson(person.key, { eng_last_name: filterEnglishOnly(e.target.value) })
                           }
                         />
+                        <FieldError message={err(person.key, "eng_last_name")} />
                       </div>
                     </div>
 
-                    <div>
-                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">เพศ / Gender</label>
+                    <div
+                      data-field={fieldId(person.key, "gender")}
+                      data-invalid={err(person.key, "gender") ? "true" : undefined}
+                    >
+                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                        เพศ / Gender
+                        <RequiredMark />
+                      </label>
                       <select
                         className={inputClass}
                         required
@@ -759,105 +823,151 @@ export default function RegisterFormPage() {
                         <option value="female">หญิง / Female</option>
                         <option value="other">อื่นๆ / Other</option>
                       </select>
+                      <FieldError message={err(person.key, "gender")} />
                     </div>
 
                     <div>
                       <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                         วัน / เดือน / ปีเกิด (ค.ศ.)
+                        <RequiredMark />
                       </label>
                       <div className="grid grid-cols-3 gap-3">
-                        <select
-                          className={inputClass}
-                          required
-                          value={person.birth_day}
-                          disabled={submitting}
-                          onChange={(e) => updatePerson(person.key, { birth_day: e.target.value })}
+                        <div
+                          data-field={fieldId(person.key, "birth_day")}
+                          data-invalid={err(person.key, "birth_day") ? "true" : undefined}
                         >
-                          <option value="">วัน</option>
-                          {DAYS.map((d) => (
-                            <option key={d} value={d}>
-                              {Number(d)}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          className={inputClass}
-                          required
-                          value={person.birth_month}
-                          disabled={submitting}
-                          onChange={(e) => updatePerson(person.key, { birth_month: e.target.value })}
+                          <select
+                            className={inputClass}
+                            required
+                            value={person.birth_day}
+                            disabled={submitting}
+                            onChange={(e) => updatePerson(person.key, { birth_day: e.target.value })}
+                          >
+                            <option value="">วัน</option>
+                            {DAYS.map((d) => (
+                              <option key={d} value={d}>
+                                {Number(d)}
+                              </option>
+                            ))}
+                          </select>
+                          <FieldError message={err(person.key, "birth_day")} />
+                        </div>
+                        <div
+                          data-field={fieldId(person.key, "birth_month")}
+                          data-invalid={err(person.key, "birth_month") ? "true" : undefined}
                         >
-                          <option value="">เดือน</option>
-                          {MONTHS.map((m) => (
-                            <option key={m.value} value={m.value}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          className={inputClass}
-                          required
-                          value={person.birth_year}
-                          disabled={submitting}
-                          onChange={(e) => updatePerson(person.key, { birth_year: e.target.value })}
+                          <select
+                            className={inputClass}
+                            required
+                            value={person.birth_month}
+                            disabled={submitting}
+                            onChange={(e) => updatePerson(person.key, { birth_month: e.target.value })}
+                          >
+                            <option value="">เดือน</option>
+                            {MONTHS.map((m) => (
+                              <option key={m.value} value={m.value}>
+                                {m.label}
+                              </option>
+                            ))}
+                          </select>
+                          <FieldError message={err(person.key, "birth_month")} />
+                        </div>
+                        <div
+                          data-field={fieldId(person.key, "birth_year")}
+                          data-invalid={err(person.key, "birth_year") ? "true" : undefined}
                         >
-                          <option value="">ปี</option>
-                          {YEARS.map((y) => (
-                            <option key={y} value={y}>
-                              {y}
-                            </option>
-                          ))}
-                        </select>
+                          <select
+                            className={inputClass}
+                            required
+                            value={person.birth_year}
+                            disabled={submitting}
+                            onChange={(e) => updatePerson(person.key, { birth_year: e.target.value })}
+                          >
+                            <option value="">ปี</option>
+                            {YEARS.map((y) => (
+                              <option key={y} value={y}>
+                                {y}
+                              </option>
+                            ))}
+                          </select>
+                          <FieldError message={err(person.key, "birth_year")} />
+                        </div>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
+                      <div
+                        data-field={fieldId(person.key, "phone")}
+                        data-invalid={err(person.key, "phone") ? "true" : undefined}
+                      >
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                           เบอร์โทรศัพท์ / Phone
+                          <RequiredMark />
                         </label>
                         <input
                           className={inputClass}
                           required
+                          type="tel"
                           inputMode="tel"
+                          autoComplete="tel"
                           value={person.phone}
                           disabled={submitting}
-                          onChange={(e) => updatePerson(person.key, { phone: e.target.value })}
+                          onBeforeInput={(e) => {
+                            const data = (e.nativeEvent as InputEvent).data;
+                            if (data && /[^\d+\-\s]/.test(data)) e.preventDefault();
+                          }}
+                          onChange={(e) =>
+                            updatePerson(person.key, { phone: filterPhoneInput(e.target.value) })
+                          }
                         />
-                        <p className="text-xs text-gray-500 mt-1">ใช้ยืนยันตัวตนเมื่อตั้ง/รีเซ็ตรหัสผ่าน</p>
+                        <FieldError message={err(person.key, "phone")} />
+                        <p className="text-xs text-gray-500 mt-1">ใช้ยืนยันตัวตนเมื่อตั้ง/รีเซ็ตรหัสผ่าน (ตัวเลข เว้นวรรค - + เท่านั้น)</p>
                       </div>
-                      <div>
+                      <div
+                        data-field={fieldId(person.key, "line_id")}
+                        data-invalid={err(person.key, "line_id") ? "true" : undefined}
+                      >
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                           Line ID
                         </label>
                         <input
                           className={inputClass}
-                          required
                           value={person.line_id}
                           disabled={submitting}
                           onChange={(e) => updatePerson(person.key, { line_id: e.target.value })}
                         />
+                        <FieldError message={err(person.key, "line_id")} />
                       </div>
                     </div>
 
-                    <div>
+                    <div
+                      data-field={fieldId(person.key, "email")}
+                      data-invalid={err(person.key, "email") ? "true" : undefined}
+                    >
                       <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                         E-mail
+                        <RequiredMark />
                       </label>
                       <input
                         className={inputClass}
                         required
                         type="email"
                         inputMode="email"
+                        autoComplete="email"
                         value={person.email}
                         disabled={submitting}
                         onChange={(e) => updatePerson(person.key, { email: e.target.value })}
                       />
+                      <FieldError message={err(person.key, "email")} />
                     </div>
 
-                    <div>
+                    <div
+                      data-field={fieldId(person.key, "position")}
+                      data-invalid={err(person.key, "position") ? "true" : undefined}
+                    >
                       <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                         ตำแหน่ง / Position
+                        <RequiredMark />
                       </label>
                       <select
                         className={inputClass}
@@ -873,11 +983,16 @@ export default function RegisterFormPage() {
                           </option>
                         ))}
                       </select>
+                      <FieldError message={err(person.key, "position")} />
                     </div>
 
-                    <div>
+                    <div
+                      data-field={fieldId(person.key, "ict_talent_cohort")}
+                      data-invalid={err(person.key, "ict_talent_cohort") ? "true" : undefined}
+                    >
                       <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                         ท่านเคยเป็นสมาชิกของ ICT Talent หรือไม่?
+                        <RequiredMark />
                       </label>
                       <select
                         className={inputClass}
@@ -897,6 +1012,7 @@ export default function RegisterFormPage() {
                           </option>
                         ))}
                       </select>
+                      <FieldError message={err(person.key, "ict_talent_cohort")} />
                     </div>
 
                     <div className="space-y-5 pt-2 border-t border-gray-100">
@@ -908,8 +1024,16 @@ export default function RegisterFormPage() {
                       </p>
 
                       {ICT_SURVEY_SECTIONS.map((section) => (
-                        <fieldset key={section.key} className="space-y-2">
-                          <legend className="text-sm font-semibold text-gray-800">{section.title}</legend>
+                        <fieldset
+                          key={section.key}
+                          className="space-y-2"
+                          data-field={fieldId(person.key, `survey:${section.key}`)}
+                          data-invalid={err(person.key, `survey:${section.key}`) ? "true" : undefined}
+                        >
+                          <legend className="text-sm font-semibold text-gray-800">
+                            {section.title}
+                            <RequiredMark />
+                          </legend>
                           <div className="space-y-1.5 pl-1">
                             {section.options.map((opt) => {
                               const checked = person.ict_survey[section.key].includes(opt);
@@ -932,12 +1056,17 @@ export default function RegisterFormPage() {
                               );
                             })}
                           </div>
+                          <FieldError message={err(person.key, `survey:${section.key}`)} />
                         </fieldset>
                       ))}
 
-                      <div>
+                      <div
+                        data-field={fieldId(person.key, "survey:sms_usage")}
+                        data-invalid={err(person.key, "survey:sms_usage") ? "true" : undefined}
+                      >
                         <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
                           การใช้งานระบบ SMS (School Management System)
+                          <RequiredMark />
                         </label>
                         <p className="text-xs text-gray-500 mb-2">เลือกได้มากกว่า 1 ข้อ</p>
                         <div className="space-y-2 rounded-xl border border-gray-200 p-3 bg-gray-50/50">
@@ -966,6 +1095,7 @@ export default function RegisterFormPage() {
                             );
                           })}
                         </div>
+                        <FieldError message={err(person.key, "survey:sms_usage")} />
                       </div>
                     </div>
                   </div>

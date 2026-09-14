@@ -22,9 +22,9 @@ function AdminHome() {
       show: true,
     },
     {
-      href: "/admin/registrations",
-      title: "จัดการ - การลงทะเบียน",
-      desc: "ค้นด้วยชื่อโรงเรียนหรือรหัสโรงเรียน",
+      href: "/admin/users",
+      title: "จัดการ - ผู้ใช้งาน",
+      desc: "ค้นหาด้วยเลขบัตร/ชื่อ/โรงเรียน จัดการบทบาท อีเมล ระงับ และลบบัญชี",
       show: true,
     },
     {
@@ -54,13 +54,13 @@ function AdminHome() {
   ];
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-12 animate-fade-in-up">
+    <div className="max-w-5xl mx-auto px-4 py-12 animate-fade-in-up admin-surface">
       <AdminNav />
-      <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">ศูนย์ผู้ดูแลระบบ</h1>
-      <p className="text-gray-500 dark:text-slate-400 mb-8">
+      <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] dark:text-white mb-2">ศูนย์ผู้ดูแลระบบ</h1>
+      <p className="text-gray-500 dark:text-white/80 mb-8">
         สวัสดี {adminUser?.full_name}
         {adminUser?.role ? (
-          <span className="block text-sm text-gray-400 dark:text-slate-500 font-medium mt-0.5">{adminUser.role}</span>
+          <span className="block text-sm text-gray-400 dark:text-white/70 font-medium mt-0.5">{adminUser.role}</span>
         ) : null}
       </p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -70,10 +70,10 @@ function AdminHome() {
             <Link
               key={c.href}
               href={c.href}
-              className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-900 p-6 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+              className="rounded-2xl border border-gray-100 dark:border-slate-700 bg-white dark:bg-black p-6 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
             >
-              <h2 className="text-xl font-bold text-[var(--primary-blue)] mb-2">{c.title}</h2>
-              <p className="text-sm text-gray-500 dark:text-slate-400">{c.desc}</p>
+              <h2 className="text-xl font-bold text-[var(--primary-blue)] dark:text-white mb-2">{c.title}</h2>
+              <p className="text-sm text-gray-500 dark:text-white/80">{c.desc}</p>
             </Link>
           ))}
       </div>

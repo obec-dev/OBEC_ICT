@@ -8,7 +8,7 @@ import { useIctStore } from "@/contexts/IctStore";
 import { fetchSchoolsByDistrict, searchSchoolsByName } from "@/lib/supabase/data";
 import type { DistrictStat, School } from "@/types/ict";
 
-export default function DashboardPage() {
+function DashboardContent() {
   const { districtStats, schoolTotals, loading, loadError, refreshData } = useIctStore();
   const [schoolQuery, setSchoolQuery] = useState("");
   const [areaZone, setAreaZone] = useState("");
@@ -247,4 +247,8 @@ export default function DashboardPage() {
       </div>
     </div>
   );
+}
+
+export default function DashboardPage() {
+  return <DashboardContent />;
 }

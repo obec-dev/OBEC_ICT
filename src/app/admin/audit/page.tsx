@@ -38,8 +38,11 @@ function AuditContent() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const PAGE_SIZE = 50;
 
   const reload = useCallback(async () => {
     if (!adminToken) return;
@@ -47,11 +50,12 @@ function AuditContent() {
     setError("");
     try {
       const [list, st, hist] = await Promise.all([
-        adminListAuditLogs(adminToken, 150, 0),
+        adminListAuditLogs(adminToken, PAGE_SIZE, 0),
         adminAuditStats(adminToken),
         adminListPurgeHistory(adminToken),
       ]);
       setLogs(list);
+      setHasMore(list.length >= PAGE_SIZE);
       setStats(st);
       setHistory(hist);
     } catch (err) {
@@ -64,6 +68,21 @@ function AuditContent() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  const loadMore = async () => {
+    if (!adminToken || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const next = await adminListAuditLogs(adminToken, PAGE_SIZE, logs.length);
+      setLogs((prev) => [...prev, ...next]);
+      setHasMore(next.length >= PAGE_SIZE);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "โหลดเพิ่มไม่สำเร็จ");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const exportLogs = async () => {
     if (!adminToken) return;
@@ -193,8 +212,10 @@ function AuditContent() {
         <p className="text-gray-500">กำลังโหลด...</p>
       ) : (
         <>
-          <h2 className="font-bold text-[var(--primary-blue)] mb-3">รายการล่าสุด (150 แถว)</h2>
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto mb-8">
+          <h2 className="font-bold text-[var(--primary-blue)] mb-3">
+            รายการล่าสุด ({logs.length} แถว{stats ? ` / ทั้งหมด ~${stats.total_logs}` : ""})
+          </h2>
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto mb-4">
             <table className="w-full text-sm">
               <thead className="bg-[var(--primary-blue)] text-white">
                 <tr>
@@ -225,6 +246,18 @@ function AuditContent() {
               </tbody>
             </table>
           </div>
+          {hasMore && (
+            <div className="mb-8 flex justify-center">
+              <button
+                type="button"
+                disabled={loadingMore}
+                onClick={() => void loadMore()}
+                className="rounded-full border border-gray-200 bg-white px-6 py-2.5 text-sm font-bold text-[var(--primary-blue)] disabled:opacity-40"
+              >
+                {loadingMore ? "กำลังโหลด..." : "โหลดเพิ่มเติม (Load More)"}
+              </button>
+            </div>
+          )}
 
           <h2 className="font-bold text-[var(--primary-blue)] mb-3">ประวัติการล้าง (อ้างอิงไฟล์ภายนอก)</h2>
           <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto">
