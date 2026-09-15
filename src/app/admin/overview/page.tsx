@@ -4,8 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
-import { AdminReportingPanel } from "@/app/components/AdminReportingPanel";
+import {
+  AnalyticsReportsPanel,
+  ExamResultsExportPanel,
+} from "@/app/components/AdminReportingPanel";
 import { useIctStore } from "@/contexts/IctStore";
+import { isReportFailed, isReportPassed } from "@/lib/examReports";
 import { getSiteProject } from "@/lib/siteSettings";
 import {
   adminMissionProgressStats,
@@ -179,12 +183,8 @@ function OverviewContent() {
   const draftCount = projectExams.filter((e) => e.status === "draft").length;
   const finishedCount = projectExams.filter((e) => e.status === "submitted").length;
   const inProgressCount = draftCount;
-  const passedCount = projectExams.filter(
-    (e) => e.status === "submitted" && Boolean(e.graded_at) && e.passed === true
-  ).length;
-  const failedCount = projectExams.filter(
-    (e) => e.status === "submitted" && Boolean(e.graded_at) && e.passed === false
-  ).length;
+  const passedCount = projectExams.filter(isReportPassed).length;
+  const failedCount = projectExams.filter(isReportFailed).length;
   const notTakenCount = Math.max(0, eligible - finishedCount - inProgressCount);
 
   const pct =
@@ -205,8 +205,6 @@ function OverviewContent() {
           เปิดแดชบอร์ดสาธารณะ (รายเขต)
         </Link>
       </div>
-
-      <AdminReportingPanel />
 
       {loading && <p className="text-gray-500 mb-4 mt-6">กำลังโหลดสถิติ...</p>}
       {error && (
@@ -279,10 +277,14 @@ function OverviewContent() {
 
           {/* Part 2 */}
           <section className="border-t border-gray-200 pt-10">
-            <h2 className="text-xl font-extrabold text-[var(--primary-blue)] mb-1">
-              ติดตามผลการทดสอบ
-            </h2>
-            <p className="text-xs text-gray-500 dark:text-slate-400 mb-5">ติดตามสถานะการสอบและผลการผ่านเกณฑ์</p>
+            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-xl font-extrabold text-[var(--primary-blue)] mb-1">
+                  ติดตามผลการทดสอบ
+                </h2>
+                <p className="text-xs text-gray-500 dark:text-slate-400">ติดตามสถานะการสอบและผลการผ่านเกณฑ์</p>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               <StatCard label="ผู้มีสิทธิ์สอบ" value={eligible.toLocaleString()} tone="blue" />
@@ -317,9 +319,15 @@ function OverviewContent() {
               notTaken={notTakenCount}
               total={eligible}
             />
+
+            <ExamResultsExportPanel />
           </section>
+
+          <AnalyticsReportsPanel />
         </>
       )}
+
+      {!stats && !loading && <AnalyticsReportsPanel />}
     </div>
   );
 }

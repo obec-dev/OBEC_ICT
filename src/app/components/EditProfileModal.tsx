@@ -87,7 +87,7 @@ function EditProfileForm({ session, candidate, onClose }: EditProfileFormProps) 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-100 text-xs">
               <div>
-                <span className="block font-medium text-gray-400 mb-0.5">เลขบัตรประชาชน (ล็อก)</span>
+                <span className="block font-medium text-gray-400 mb-0.5">หมายเลขสมาชิก</span>
                 <span className="font-bold text-gray-700 tracking-wide">{candidate.id}</span>
               </div>
               <div>

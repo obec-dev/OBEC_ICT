@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { AuthGuard } from "@/app/components/AuthGuard";
+import { ExamAccessGate } from "@/app/components/ExamAccessGate";
 import { useIctStore } from "@/contexts/IctStore";
 import { fetchMyMissions, submitMissionUrl } from "@/lib/supabase/data";
-import { getSiteProject } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
 import type { UserMissionProgress } from "@/types/ict";
 
@@ -135,32 +135,9 @@ function MissionsContent() {
 export default function PortalMissionsPage() {
   return (
     <AuthGuard requirePortalRoles={["user", "school_admin"]}>
-      <MissionsGate />
+      <ExamAccessGate mode="missions">
+        <MissionsContent />
+      </ExamAccessGate>
     </AuthGuard>
   );
-}
-
-function MissionsGate() {
-  const { examProgress, projects, currentCandidate } = useIctStore();
-  const siteProject = getSiteProject(projects);
-  const exam = examProgress.find(
-    (e) =>
-      e.candidate_id === currentCandidate?.id &&
-      (!siteProject?.id || e.project_id === siteProject.id || !e.project_id)
-  );
-  const allowed =
-    Boolean(siteProject?.enable_results_visibility) &&
-    Boolean(exam?.passed === true && exam?.graded_at);
-
-  if (!allowed) {
-    return (
-      <div className="max-w-lg mx-auto px-4 py-16 text-center">
-        <h1 className="text-2xl font-extrabold text-[var(--primary-blue)] mb-2">ภารกิจยังไม่เปิดใช้งาน</h1>
-        <p className="text-sm text-gray-500">
-          เมนูภารกิจจะแสดงเมื่อท่านสอบผ่าน และระบบเปิดเผยผลการทดสอบแล้ว
-        </p>
-      </div>
-    );
-  }
-  return <MissionsContent />;
 }

@@ -3,30 +3,21 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { accessRoleFromSession } from "@/lib/auth/access";
+import { candidateCanAccessMissions } from "@/lib/examAccess";
 import { useIctStore } from "@/contexts/IctStore";
 import { SessionMenu } from "./SessionMenu";
 import { ThemeToggle } from "./ThemeToggle";
-import { getSiteProject } from "@/lib/siteSettings";
 
 export function Nav() {
   const { session, isAdmin, examProgress, projects } = useIctStore();
   const isLoggedIn = Boolean(session);
   const accessRole = accessRoleFromSession(session);
-
-  const showMissions = useMemo(() => {
-    if (session?.kind !== "candidate") return false;
-    if (accessRole !== "user" && accessRole !== "school_admin") return false;
-    const project = getSiteProject(projects);
-    if (!project?.enable_results_visibility) return false;
-    const exam = examProgress.find(
-      (e) =>
-        e.candidate_id === session.candidate.id &&
-        (!project.id || e.project_id === project.id || !e.project_id)
-    );
-    return Boolean(exam?.passed === true && exam?.graded_at);
-  }, [accessRole, session, examProgress, projects]);
-
   const isCandidate = accessRole === "user" || accessRole === "school_admin";
+  const showMissions = useMemo(
+    () => candidateCanAccessMissions(session, examProgress, projects),
+    [session, examProgress, projects]
+  );
+  const showLearnExam = isCandidate && !showMissions;
 
   return (
     <nav className="sticky top-0 z-50 w-full bg-white dark:bg-slate-950 opacity-100 shadow-md transition-all duration-300">
@@ -54,7 +45,7 @@ export function Nav() {
                   ลงทะเบียน
                 </Link>
               )}
-              {isCandidate && (
+              {showLearnExam && (
                 <>
                   <Link
                     href="/portal/learn"

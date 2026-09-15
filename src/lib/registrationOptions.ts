@@ -14,6 +14,48 @@ export const POSITION_OPTIONS = [
 
 export type PositionOption = (typeof POSITION_OPTIONS)[number];
 
+/** Dropdown sentinel. The typed title is stored in `profiles.position` and mirrored in `position_other`. */
+export const POSITION_OTHER = "อื่นๆ";
+export const POSITION_OTHER_MAX = 120;
+
+export function isListedPosition(value: string): boolean {
+  return (POSITION_OPTIONS as readonly string[]).includes(value.trim());
+}
+
+/** Restore the dropdown + textbox from stored columns, including legacy free text. */
+export function positionFormState(
+  position?: string | null,
+  positionOther?: string | null
+): { position: string; positionOther: string } {
+  const listed = position?.trim() ?? "";
+  if (listed && isListedPosition(listed)) {
+    return { position: listed, positionOther: "" };
+  }
+  const custom = (positionOther || (listed && listed !== POSITION_OTHER ? listed : "")).trim();
+  if (listed === POSITION_OTHER || custom) {
+    return { position: POSITION_OTHER, positionOther: custom };
+  }
+  return { position: "", positionOther: "" };
+}
+
+/** Label to show in lists. Custom titles replace the "อื่นๆ" sentinel. */
+export function displayPosition(position?: string | null, positionOther?: string | null): string {
+  if ((position ?? "").trim() === POSITION_OTHER) return (positionOther ?? "").trim();
+  return (position ?? "").trim();
+}
+
+/** Persist a listed title, or the typed title, into `profiles.position`. */
+export function storedPositionFields(selected: string, custom: string): {
+  position: string;
+  position_other: string;
+} {
+  if (selected.trim() === POSITION_OTHER) {
+    const typed = custom.trim();
+    return { position: typed, position_other: typed };
+  }
+  return { position: selected.trim(), position_other: "" };
+}
+
 export const ICT_TALENT_COHORT_OPTIONS = [
   { value: "never", label: "ไม่เคย" },
   { value: "gen1", label: "เคยเป็นรุ่นที่ 1" },

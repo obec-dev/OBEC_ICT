@@ -3,36 +3,66 @@
 import { useMemo, useState } from "react";
 import { inputClass } from "@/lib/styles";
 
+export type ComboboxOption = { value: string; label: string };
+
 type ComboboxProps = {
-  label: string;
+  label?: string;
   value: string;
-  options: string[];
+  options: string[] | ComboboxOption[];
   placeholder?: string;
+  allLabel?: string;
   onChange: (value: string) => void;
+  onOpen?: () => void;
 };
 
-export function Combobox({ label, value, options, placeholder, onChange }: ComboboxProps) {
+function normalizeOptions(options: string[] | ComboboxOption[]): ComboboxOption[] {
+  return options.map((option) =>
+    typeof option === "string" ? { value: option, label: option } : option
+  );
+}
+
+export function Combobox({
+  label,
+  value,
+  options,
+  placeholder,
+  allLabel = "ทั้งหมด",
+  onChange,
+  onOpen,
+}: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const normalized = useMemo(() => normalizeOptions(options), [options]);
+  const selected = normalized.find((option) => option.value === value);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = q ? options.filter((o) => o.toLowerCase().includes(q)) : options;
-    return list.slice(0, 80);
-  }, [options, query]);
+    const list = q
+      ? normalized.filter((option) => {
+          const labelHit = option.label.toLowerCase().includes(q);
+          // Allow finding by id when typing, but labels stay name-only in the UI.
+          const valueHit = option.value.toLowerCase().includes(q);
+          return labelHit || valueHit;
+        })
+      : normalized;
+    return list.slice(0, 120);
+  }, [normalized, query]);
 
-  const display = value || query;
+  const display = selected?.label ?? "";
 
   return (
     <div className="relative">
-      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">{label}</label>
+      {label ? (
+        <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">{label}</label>
+      ) : null}
       <input
         className={inputClass}
         value={open ? query : display}
         placeholder={placeholder}
         onFocus={() => {
           setOpen(true);
-          setQuery(value);
+          setQuery(selected?.label || value);
+          onOpen?.();
         }}
         onChange={(e) => {
           setQuery(e.target.value);
@@ -55,21 +85,21 @@ export function Combobox({ label, value, options, placeholder, onChange }: Combo
               setOpen(false);
             }}
           >
-            ทั้งหมด
+            {allLabel}
           </button>
           {filtered.map((option) => (
             <button
               type="button"
-              key={option}
+              key={option.value}
               className="block w-full text-left px-4 py-2 text-sm text-gray-800 hover:bg-blue-50"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
-                onChange(option);
-                setQuery(option);
+                onChange(option.value);
+                setQuery(option.label);
                 setOpen(false);
               }}
             >
-              {option}
+              {option.label}
             </button>
           ))}
           {filtered.length === 0 && (

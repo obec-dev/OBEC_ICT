@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
+import { ExamAccessGate } from "@/app/components/ExamAccessGate";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { useIctStore } from "@/contexts/IctStore";
 import { getSiteProject } from "@/lib/siteSettings";
@@ -380,7 +381,9 @@ function LearnContent() {
 export default function LearnPage() {
   return (
     <AuthGuard requirePortalRoles={["user", "school_admin"]}>
-      <LearnContent />
+      <ExamAccessGate mode="learn-exam">
+        <LearnContent />
+      </ExamAccessGate>
     </AuthGuard>
   );
 }

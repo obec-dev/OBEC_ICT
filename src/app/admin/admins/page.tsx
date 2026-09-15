@@ -112,7 +112,7 @@ function AdminsContent() {
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 mb-6 space-y-3">
         <h2 className="font-bold text-[var(--primary-blue)]">เพิ่มผู้ดูแลใหม่</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input className={inputClass} placeholder="username" value={username} onChange={(e) => setUsername(e.target.value)} />
+          <input className={inputClass} placeholder="ชื่อผู้ใช้" value={username} onChange={(e) => setUsername(e.target.value)} />
           <input className={inputClass} placeholder="ชื่อ-นามสกุล" value={fullName} onChange={(e) => setFullName(e.target.value)} />
           <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as AdminRole)}>
             <option value="admin">admin (จัดการ - การลงทะเบียน)</option>

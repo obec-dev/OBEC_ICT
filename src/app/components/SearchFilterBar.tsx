@@ -40,7 +40,7 @@ export function SearchFilterBar({
           label="เขตพื้นที่"
           value={areaZone}
           options={areaOptions}
-          placeholder="เลือกเขตพื้นที่"
+          placeholder="เลือกเขตพื้นที่การศึกษา"
           onChange={onAreaZoneChange}
         />
         <Combobox

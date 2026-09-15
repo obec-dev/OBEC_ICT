@@ -43,6 +43,7 @@ type ProfileRow = {
   birth_date?: string | null;
   gender?: string | null;
   position?: string | null;
+  position_other?: string | null;
   duty?: string | null;
   line_id?: string | null;
   email?: string | null;
@@ -115,6 +116,7 @@ export function mapProfileRow(row: ProfileRow): Candidate {
     birth_date: row.birth_date ?? undefined,
     gender: row.gender ?? undefined,
     position: row.position ?? undefined,
+    position_other: row.position_other ?? undefined,
     duty: row.duty ?? undefined,
     line_id: row.line_id ?? undefined,
     email: row.contact_email ?? row.email ?? undefined,
@@ -219,19 +221,23 @@ export async function fetchSchoolById(schoolId: string): Promise<School | null> 
   return mapSchoolRow(data as SchoolRow);
 }
 
-/** Search schools by name or school_id (lightweight, limited) */
+/** Search schools by name or school_id. Empty query preloads registered schools. */
 export async function searchSchoolsByName(query: string, limit = 50): Promise<School[]> {
   const q = query.trim().replace(/[%_,]/g, " ").replace(/\s+/g, " ").trim();
-  if (!q) return [];
-
   const supabase = createClient();
-  const { data, error } = await supabase
+  let req = supabase
     .from("schools")
     .select("school_id, school_name, province, is_registered, district_id, districts(district_name)")
-    .or(`school_name.ilike.%${q}%,school_id.ilike.%${q}%`)
     .order("school_name")
     .limit(limit);
 
+  if (!q) {
+    req = req.eq("is_registered", true);
+  } else {
+    req = req.or(`school_name.ilike.%${q}%,school_id.ilike.%${q}%`);
+  }
+
+  const { data, error } = await req;
   if (error) throw new Error(error.message);
   return ((data as SchoolRow[] | null) ?? []).map(mapSchoolRow);
 }
@@ -259,6 +265,7 @@ function mapRpcProfileJson(raw: Record<string, unknown>): Candidate {
     birth_date: raw.birth_date == null ? null : String(raw.birth_date),
     gender: raw.gender == null ? null : String(raw.gender),
     position: raw.position == null ? null : String(raw.position),
+    position_other: raw.position_other == null ? null : String(raw.position_other),
     duty: raw.duty == null ? null : String(raw.duty),
     line_id: raw.line_id == null ? null : String(raw.line_id),
     email: raw.email == null && raw.contact_email == null ? null : String(raw.contact_email ?? raw.email),
@@ -270,7 +277,8 @@ function mapRpcProfileJson(raw: Record<string, unknown>): Candidate {
     created_at: raw.created_at == null ? null : String(raw.created_at),
     schools: raw.school_name ? { school_name: String(raw.school_name) } : null,
     is_school_admin: Boolean(raw.is_school_admin),
-    must_set_password: raw.must_set_password == null ? true : Boolean(raw.must_set_password),
+    // Missing flag must not force first-time setup. Only an explicit true does.
+    must_set_password: raw.must_set_password === true,
     ict_talent_cohort: raw.ict_talent_cohort == null ? null : String(raw.ict_talent_cohort),
     ict_survey:
       raw.ict_survey && typeof raw.ict_survey === "object"
@@ -283,7 +291,8 @@ function mapRpcProfileJson(raw: Record<string, unknown>): Candidate {
 }
 
 export type RegisterProfileInput = {
-  profile_id: string;
+  /** Empty/omitted — the database mints a 13-digit profile_id. */
+  profile_id?: string;
   school_id: string;
   /** Thai given name */
   first_name: string;
@@ -302,6 +311,7 @@ export type RegisterProfileInput = {
   birth_date: string;
   gender: string;
   position: string;
+  position_other?: string;
   duty: string;
   line_id: string;
   email: string;
@@ -341,7 +351,7 @@ export async function findProfileById(profileId: string): Promise<{
 export async function insertProfile(input: RegisterProfileInput): Promise<Candidate> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("register_profile", {
-    p_profile_id: input.profile_id.trim(),
+    p_profile_id: input.profile_id?.trim() || null,
     p_school_id: input.school_id,
     p_first_name: input.first_name.trim(),
     p_last_name: input.last_name.trim(),
@@ -358,6 +368,7 @@ export async function insertProfile(input: RegisterProfileInput): Promise<Candid
     p_birth_date: input.birth_date,
     p_gender: input.gender,
     p_position: input.position.trim(),
+    p_position_other: input.position_other?.trim() || null,
     p_duty: input.duty.trim(),
     p_line_id: input.line_id.trim(),
     p_email: input.email.trim().toLowerCase(),
@@ -391,6 +402,7 @@ export type OwnProfilePatch = Partial<
     | "eng_first_name"
     | "eng_last_name"
     | "position"
+    | "position_other"
     | "duty"
     | "line_id"
     | "email"
@@ -553,7 +565,10 @@ export async function loginCandidateWithPassword(
     };
   }
 
-  return { ok: true, kind: "candidate", candidate: mapRpcProfileJson(asRpcObj(row.profile)) };
+  const candidate = mapRpcProfileJson(asRpcObj(row.profile));
+  // login_candidate only returns ok after the password is already set and verified.
+  candidate.must_set_password = false;
+  return { ok: true, kind: "candidate", candidate };
 }
 
 export async function setExecutivePassword(
@@ -631,11 +646,11 @@ export async function verifyCandidateForPassword(email: string, phone: string) {
   };
 }
 
-/** Forgot password: National ID (profile_id) + current phone */
-export async function verifyCandidateForgotPassword(nationalId: string, phone: string) {
+/** Forgot password: login email + current phone. Returns the account login email. */
+export async function verifyCandidateForgotPassword(email: string, phone: string) {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("verify_candidate_forgot_password", {
-    p_national_id: nationalId.trim(),
+    p_email: email.trim().toLowerCase(),
     p_phone: phone.trim(),
   });
   if (error) return { ok: false as const, error: error.message };
@@ -658,15 +673,14 @@ export async function verifyCandidateForgotPassword(nationalId: string, phone: s
 export async function setCandidatePassword(
   email: string,
   phone: string,
-  newPassword: string,
-  nationalId?: string | null
+  newPassword: string
 ) {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("set_candidate_password", {
     p_email: email.trim().toLowerCase(),
     p_phone: phone.trim(),
     p_new_password: newPassword,
-    p_national_id: nationalId?.trim() || null,
+    p_birth_date: null,
   });
   if (error) return { ok: false as const, error: error.message };
   const row = asRpcObj(data);
@@ -1061,6 +1075,52 @@ export async function upsertExamProgressToDb(input: {
 
   const row = asRpcObj(data);
   if (!row.ok) throw new Error(String(row.error ?? "บันทึกข้อสอบไม่สำเร็จ"));
+}
+
+function asAnswerMap(value: unknown): Record<string, string> {
+  if (typeof value === "string") {
+    try {
+      return asAnswerMap(JSON.parse(value) as unknown);
+    } catch {
+      return {};
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const answers: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (item == null) continue;
+    answers[key] = String(item);
+  }
+  return answers;
+}
+
+/** Load this candidate's own exam draft/submission. Never read answers from local storage. */
+export async function fetchMyExamProgress(profileId: string, phone: string): Promise<ExamProgress[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("get_my_exam_progress", {
+    p_profile_id: profileId,
+    p_phone: phone,
+    p_project_id: null,
+  });
+  if (error) throw new Error(error.message);
+
+  const row = asRpcObj(data);
+  if (!row.ok) throw new Error(String(row.error ?? "โหลดคำตอบข้อสอบไม่สำเร็จ"));
+  if (!Array.isArray(row.rows)) return [];
+
+  return row.rows.map((item) => {
+    const exam = asRpcObj(item);
+    return {
+      candidate_id: String(exam.profile_id ?? profileId),
+      project_id: exam.project_id ? String(exam.project_id) : undefined,
+      answers: asAnswerMap(exam.answers),
+      status: exam.status === "submitted" ? ("submitted" as const) : ("draft" as const),
+      score: exam.score != null ? Number(exam.score) : undefined,
+      passed: typeof exam.passed === "boolean" ? exam.passed : undefined,
+      graded_at: exam.graded_at ? String(exam.graded_at) : undefined,
+      updated_at: exam.updated_at ? String(exam.updated_at) : new Date().toISOString(),
+    };
+  });
 }
 
 /** @deprecated Public exam progress scans are blocked. Use adminListExamProgressRpc. */

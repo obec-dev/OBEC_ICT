@@ -1,8 +1,18 @@
 import { createClient } from "@/lib/supabase/client";
-import type { LearningProject, ProjectQuestion, ProjectVideo, PublicExamQuestion } from "@/types/ict";
+import type { ExamSection, LearningProject, ProjectQuestion, ProjectVideo, PublicExamQuestion } from "@/types/ict";
 import { MOCK_PROJECTS, MOCK_QUESTIONS, MOCK_VIDEOS } from "@/data/mockProjects";
 
 function asRpcObj(data: unknown): Record<string, unknown> {
+  if (typeof data === "string") {
+    try {
+      const parsed = JSON.parse(data) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
   if (data && typeof data === "object" && !Array.isArray(data)) {
     return data as Record<string, unknown>;
   }
@@ -92,21 +102,37 @@ function stripKeys(questions: ProjectQuestion[]): PublicExamQuestion[] {
 export async function fetchPublicExamQuestions(projectId?: string): Promise<PublicExamQuestion[]> {
   try {
     const supabase = createClient();
+    const baseColumns =
+      "id, project_id, prompt, type, options, image_url, points, order_index, answer_required";
+    const sectionColumns = `${baseColumns}, section_id, section_title, section_description, section_order`;
     let query = supabase
       .from("public_project_questions")
-      .select("id, project_id, prompt, type, options, image_url, points, order_index, answer_required")
+      .select(sectionColumns)
       .order("order_index", { ascending: true });
     if (projectId) {
       query = query.eq("project_id", projectId);
     }
-    const { data, error } = await query;
+    let data: PublicExamQuestion[] | null = null;
+    const { data: primaryData, error: primaryError } = await query;
+    let error = primaryError;
+    data = (primaryData as PublicExamQuestion[] | null) ?? null;
+    if (error) {
+      let fallback = supabase
+        .from("public_project_questions")
+        .select(baseColumns)
+        .order("order_index", { ascending: true });
+      if (projectId) fallback = fallback.eq("project_id", projectId);
+      const retry = await fallback;
+      data = (retry.data as PublicExamQuestion[] | null) ?? null;
+      error = retry.error;
+    }
     if (error || !data) {
       const mocks = projectId
         ? MOCK_QUESTIONS.filter((q) => q.project_id === projectId)
         : MOCK_QUESTIONS;
       return stripKeys(mocks);
     }
-    return data as PublicExamQuestion[];
+    return data;
   } catch {
     const mocks = projectId
       ? MOCK_QUESTIONS.filter((q) => q.project_id === projectId)
@@ -215,7 +241,7 @@ export async function deleteProjectVideoDb(token: string, videoId: string): Prom
   assertAdminRpcOk(data, "ลบวิดีโอไม่สำเร็จ");
 }
 
-export async function upsertProjectQuestion(token: string, question: ProjectQuestion): Promise<void> {
+export async function upsertProjectQuestion(token: string, question: ProjectQuestion): Promise<string | null> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_upsert_question", {
     p_token: token,
@@ -231,6 +257,7 @@ export async function upsertProjectQuestion(token: string, question: ProjectQues
       points: question.points ?? 1,
       order_index: question.order_index ?? 0,
       answer_required: question.answer_required !== false,
+      section_id: question.section_id || null,
     },
   });
   if (error) {
@@ -238,6 +265,8 @@ export async function upsertProjectQuestion(token: string, question: ProjectQues
     throw new Error(`บันทึกข้อสอบไปยัง Supabase ไม่สำเร็จ: ${error.message}`);
   }
   assertAdminRpcOk(data, "บันทึกข้อสอบไม่สำเร็จ");
+  const code = asRpcObj(data).question_code;
+  return typeof code === "string" && code.trim() ? code.trim() : null;
 }
 
 export async function deleteProjectQuestionDb(token: string, questionId: string): Promise<void> {
@@ -253,30 +282,164 @@ export async function deleteProjectQuestionDb(token: string, questionId: string)
   assertAdminRpcOk(data, "ลบข้อสอบไม่สำเร็จ");
 }
 
-/** CSV Parser helper mapping CSV lines (e.g. q1,คำตอบ หรือ 1,คำตอบ) to question correct answers */
-export function parseAnswerKeysCsv(csvText: string): { questionIdOrOrder: string; correctAnswer: string }[] {
-  const lines = csvText.split(/\r?\n/);
-  const results: { questionIdOrOrder: string; correctAnswer: string }[] = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#") || trimmed.toLowerCase().startsWith("question")) continue;
-    const parts = trimmed.split(",");
-    if (parts.length >= 2) {
-      const questionIdOrOrder = parts[0].trim();
-      const correctAnswer = parts.slice(1).join(",").trim().replace(/^["']|["']$/g, "");
-      if (questionIdOrOrder && correctAnswer) {
-        results.push({ questionIdOrOrder, correctAnswer });
-      }
+function mapSection(raw: unknown): ExamSection | null {
+  const row = asRpcObj(raw);
+  const id = String(row.id ?? "").trim();
+  if (!id) return null;
+  return {
+    id,
+    project_id: String(row.project_id ?? ""),
+    title: String(row.title ?? ""),
+    description: row.description == null ? null : String(row.description),
+    section_order: Number(row.section_order ?? 0),
+  };
+}
+
+export async function adminFetchExamSections(token: string, projectId?: string): Promise<ExamSection[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_sections", {
+    p_token: token,
+    p_project_id: projectId ?? null,
+  });
+  if (error) throw new Error(error.message);
+  if (!Array.isArray(data)) return [];
+  return data.map(mapSection).filter((section): section is ExamSection => section !== null);
+}
+
+export async function upsertExamSection(token: string, section: ExamSection): Promise<void> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_upsert_section", {
+    p_token: token,
+    p_section: {
+      id: section.id,
+      project_id: section.project_id,
+      title: section.title,
+      description: section.description || null,
+      section_order: section.section_order,
+    },
+  });
+  if (error) throw new Error(error.message);
+  assertAdminRpcOk(data, "บันทึกส่วนข้อสอบไม่สำเร็จ");
+}
+
+export async function deleteExamSectionDb(token: string, sectionId: string): Promise<void> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_delete_section", {
+    p_token: token,
+    p_section_id: sectionId,
+  });
+  if (error) throw new Error(error.message);
+  assertAdminRpcOk(data, "ลบส่วนข้อสอบไม่สำเร็จ");
+}
+
+type RpcClient = {
+  rpc: (
+    fn: string,
+    args?: Record<string, unknown>
+  ) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
+};
+
+function missingRpc(message: string, name: string): boolean {
+  return new RegExp(name, "i").test(message) && /schema cache|does not exist|could not find/i.test(message);
+}
+
+export type AnswerKeyWrite = {
+  questionId?: string;
+  questionCode?: string;
+  correctAnswer?: string | null;
+};
+
+/** Writes answer keys by immutable question id or Q001 code. Blank answer clears the key. */
+export async function saveAnswerKeysByQuestionId(
+  token: string,
+  projectId: string,
+  keys: AnswerKeyWrite[],
+  client?: RpcClient
+): Promise<void> {
+  const supabase = client ?? createClient();
+
+  const listed = await supabase.rpc("admin_list_questions", {
+    p_token: token,
+    p_project_id: projectId,
+  });
+  if (listed.error) throw new Error(listed.error.message);
+  const listedData = listed.data;
+  let questions: ProjectQuestion[] = [];
+  try {
+    if (Array.isArray(listedData)) {
+      questions = listedData as ProjectQuestion[];
+    } else if (typeof listedData === "string") {
+      const parsed = JSON.parse(listedData) as unknown;
+      if (Array.isArray(parsed)) questions = parsed as ProjectQuestion[];
     }
+  } catch {
+    throw new Error("รูปแบบรายการข้อสอบจากเซิร์ฟเวอร์ไม่ถูกต้อง");
   }
-  return results;
+
+  const resolved: { question: ProjectQuestion; correctAnswer: string | null }[] = [];
+  for (const item of keys) {
+    const id = item.questionId?.trim() || "";
+    const code = item.questionCode?.trim().toUpperCase() || "";
+    const target =
+      questions.find((question) => id && question.id === id) ||
+      questions.find(
+        (question) => code && (question.question_code || "").trim().toUpperCase() === code
+      );
+    if (!target || (target.project_id && target.project_id !== projectId)) {
+      throw new Error(`ไม่พบข้อสอบ ${code || id} ในโครงการนี้`);
+    }
+    resolved.push({
+      question: target,
+      correctAnswer: (item.correctAnswer ?? "").trim() || null,
+    });
+  }
+
+  // Prefer the dedicated RPC when available, but never depend on it.
+  const payload = resolved.map(({ question, correctAnswer }) => ({
+    question_id: question.id,
+    question_code: question.question_code || "",
+    correct_answer: correctAnswer ?? "",
+  }));
+  const bulk = await supabase.rpc("admin_set_answer_keys", {
+    p_token: token,
+    p_project_id: projectId,
+    p_keys: payload,
+  });
+  if (!bulk.error) {
+    const row = asRpcObj(bulk.data);
+    if (row.ok !== false) return;
+  } else if (!missingRpc(bulk.error.message, "admin_set_answer_keys")) {
+    // Unexpected RPC transport error — still try per-question upsert below.
+  }
+
+  for (const { question, correctAnswer } of resolved) {
+    const saved = await supabase.rpc("admin_upsert_question", {
+      p_token: token,
+      p_question: {
+        id: String(question.id),
+        project_id: question.project_id,
+        prompt: question.prompt,
+        type: question.type,
+        options: question.options ?? [],
+        correct_answer: correctAnswer,
+        model_answer: question.model_answer ?? null,
+        image_url: question.image_url || null,
+        points: question.points ?? 1,
+        order_index: question.order_index ?? 0,
+        answer_required: question.answer_required !== false,
+        section_id: question.section_id || null,
+      },
+    });
+    if (saved.error) throw new Error(saved.error.message);
+    assertAdminRpcOk(saved.data, "บันทึกเฉลยไม่สำเร็จ");
+  }
 }
 
 /** Manual Grading Trigger via token-gated Supabase RPC */
 export async function gradeProjectExamsRpc(
   token: string,
   projectId: string
-): Promise<{ graded_total: number; passed_total: number }> {
+): Promise<{ graded_total: number; passed_total: number; pending_keys: number }> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("grade_project_exams", {
     p_token: token,
@@ -290,7 +453,8 @@ export async function gradeProjectExamsRpc(
     return {
       graded_total: Number(row.graded_total) || 0,
       passed_total: Number(row.passed_total) || 0,
+      pending_keys: Number(row.pending_keys) || 0,
     };
   }
-  return { graded_total: 0, passed_total: 0 };
+  return { graded_total: 0, passed_total: 0, pending_keys: 0 };
 }

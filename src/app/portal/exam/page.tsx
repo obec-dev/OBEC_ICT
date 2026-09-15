@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AuthGuard } from "@/app/components/AuthGuard";
+import { ExamAccessGate } from "@/app/components/ExamAccessGate";
 import { ModalOverlay } from "@/app/components/ModalOverlay";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { UnsavedLeaveGuard } from "@/app/components/UnsavedLeaveGuard";
 import { useIctStore } from "@/contexts/IctStore";
+import { groupQuestionsBySection } from "@/lib/examSections";
 import { getProjectExamStatus, getProjectLearningOpen, getSiteProject } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
 import type { ExamProgress, LearningProject, ProjectQuestion } from "@/types/ict";
@@ -45,6 +47,10 @@ function ExamWorkspace({
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const parts = useMemo(() => groupQuestionsBySection(projectQuestions), [projectQuestions]);
+  const [activePartId, setActivePartId] = useState(parts[0]?.id ?? "");
+  const [openParts, setOpenParts] = useState<Record<string, boolean>>({});
 
   const isDirty = useMemo(
     () => !locked && !answersEqual(answers, lastSavedAnswers),
@@ -198,12 +204,66 @@ function ExamWorkspace({
           ยังไม่มีคำถามในชุดข้อสอบนี้
         </div>
       ) : (
-        <div className="space-y-6">
-          {projectQuestions.map((question, index) => (
+        <div className="space-y-8">
+          {parts.length > 1 && (
+            <nav className="sticky top-3 z-10 flex gap-2 overflow-x-auto rounded-2xl border border-blue-100 bg-white/95 p-2 shadow-sm backdrop-blur">
+              {parts.map((part, partIndex) => {
+                const answered = part.questions.filter((q) => (answers[q.id] || "").trim()).length;
+                return (
+                  <button
+                    key={part.id}
+                    type="button"
+                    onClick={() => {
+                      setActivePartId(part.id);
+                      document.getElementById(`exam-part-${part.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                    className={`shrink-0 rounded-full px-4 py-2 text-left text-xs font-bold ${
+                      activePartId === part.id
+                        ? "bg-[var(--primary-blue)] text-white"
+                        : "bg-blue-50 text-[var(--primary-blue)]"
+                    }`}
+                  >
+                    ส่วนที่ {partIndex + 1}
+                    <span className="ml-2 font-semibold opacity-80">
+                      {answered}/{part.questions.length}
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+          )}
+          {parts.map((part, partIndex) => {
+            const answered = part.questions.filter((q) => (answers[q.id] || "").trim()).length;
+            const open = openParts[part.id] !== false;
+            return (
+            <section key={part.id} id={`exam-part-${part.id}`} className="scroll-mt-24 overflow-hidden rounded-2xl border border-blue-100 bg-white">
+              <button
+                type="button"
+                className="flex w-full items-start justify-between gap-3 bg-blue-50/70 px-5 py-4 text-left"
+                onClick={() => {
+                  setActivePartId(part.id);
+                  setOpenParts((prev) => ({ ...prev, [part.id]: !open }));
+                }}
+              >
+                <span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--primary-blue)]">
+                    ส่วนที่ {partIndex + 1}
+                  </span>
+                  <span className="mt-1 block text-xl font-extrabold text-[var(--primary-blue)]">{part.title}</span>
+                  {part.description && <span className="mt-1 block text-sm text-gray-600">{part.description}</span>}
+                  <span className="mt-2 block text-xs font-semibold text-gray-500">
+                    ตอบแล้ว {answered} จาก {part.questions.length} ข้อ
+                  </span>
+                </span>
+                <span className="shrink-0 text-sm font-bold text-[var(--primary-blue)]">{open ? "ย่อ" : "ขยาย"}</span>
+              </button>
+              {open && (
+              <div className="space-y-4 p-4">
+          {part.questions.map((question) => (
             <div key={question.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <div className="flex justify-between items-start mb-4 gap-2">
                 <h2 className="font-semibold text-base md:text-lg text-gray-800 dark:text-white">
-                  {index + 1}. {question.prompt}
+                  {question.globalNumber}. {question.prompt}
                   {question.answer_required !== false && (
                     <span className="text-[var(--accent-red)] ml-1" title="ต้องตอบก่อนส่ง">
                       *
@@ -222,7 +282,7 @@ function ExamWorkspace({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={question.image_url}
-                    alt={`ภาพประกอบข้อ ${index + 1}`}
+                    alt={`ภาพประกอบข้อ ${question.globalNumber}`}
                     className="max-h-64 w-auto rounded-xl border border-gray-200 object-contain bg-gray-50"
                   />
                 </div>
@@ -271,6 +331,11 @@ function ExamWorkspace({
               )}
             </div>
           ))}
+              </div>
+              )}
+            </section>
+            );
+          })}
         </div>
       )}
 
@@ -335,7 +400,17 @@ function ExamWorkspace({
 }
 
 function ExamContent() {
-  const { currentCandidate, getExamFor, projects, questions } = useIctStore();
+  const {
+    currentCandidate,
+    getExamFor,
+    projects,
+    questions,
+    examProgressReady,
+    examProgressError,
+    reloadExamProgress,
+  } = useIctStore();
+  const [hydratedForCandidate, setHydratedForCandidate] = useState<string | null>(null);
+  const candidateId = currentCandidate?.id ?? null;
 
   const currentProject = useMemo(() => getSiteProject(projects), [projects]);
 
@@ -365,6 +440,42 @@ function ExamContent() {
     return getProjectExamStatus(currentProject);
   }, [currentProject]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void reloadExamProgress().finally(() => {
+      if (!cancelled) setHydratedForCandidate(candidateId);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadExamProgress, candidateId]);
+
+  const answersReady = hydratedForCandidate === candidateId;
+
+  if (!examProgressReady || !answersReady) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-16 text-center text-gray-500">
+        กำลังโหลดคำตอบล่าสุดจากระบบ...
+      </div>
+    );
+  }
+
+  if (examProgressError) {
+    return (
+      <div className="max-w-lg mx-auto px-4 py-16 text-center">
+        <h1 className="text-xl font-extrabold text-[var(--primary-blue)] mb-2">โหลดคำตอบไม่สำเร็จ</h1>
+        <p className="text-sm text-gray-500 mb-6">{examProgressError}</p>
+        <button
+          type="button"
+          onClick={() => void reloadExamProgress()}
+          className="rounded-full bg-[var(--primary-blue)] text-white px-6 py-3 font-bold"
+        >
+          ลองโหลดอีกครั้ง
+        </button>
+      </div>
+    );
+  }
+
   if (!currentProject) {
     return (
       <PeriodClosedNotice
@@ -385,7 +496,7 @@ function ExamContent() {
     return <PeriodClosedNotice title="ยังไม่เปิดช่วงสอบ" status={examStatus} homeHref="/portal/learn" />;
   }
 
-  const workspaceKey = `${currentCandidate?.id ?? "anon"}-${currentProject.id}-${exam?.status ?? "none"}`;
+  const workspaceKey = `${currentCandidate?.id ?? "anon"}-${currentProject.id}-${exam?.status ?? "none"}-${exam?.updated_at ?? "empty"}`;
 
   return (
     <ExamWorkspace
@@ -402,7 +513,9 @@ function ExamContent() {
 export default function ExamPage() {
   return (
     <AuthGuard requirePortalRoles={["user", "school_admin"]}>
-      <ExamContent />
+      <ExamAccessGate mode="learn-exam">
+        <ExamContent />
+      </ExamAccessGate>
     </AuthGuard>
   );
 }

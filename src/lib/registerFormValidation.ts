@@ -1,8 +1,13 @@
-import { ICT_SURVEY_SECTIONS, POSITION_OPTIONS, type IctSurvey } from "@/lib/registrationOptions";
+import {
+  ICT_SURVEY_SECTIONS,
+  POSITION_OTHER,
+  POSITION_OTHER_MAX,
+  isListedPosition,
+  type IctSurvey,
+} from "@/lib/registrationOptions";
 import { ENG_NAME_RE, THAI_NAME_RE, getTitleByKey } from "@/lib/titles";
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-export const NATIONAL_ID_RE = /^\d{13}$/;
 /** Characters allowed in a phone field: digits, spaces, hyphens, plus. */
 const PHONE_ALLOWED_RE = /^[+\d][\d\s-]*$|^[\d\s-]+$/;
 const PHONE_STRIP_RE = /[^\d+\-\s]/g;
@@ -10,7 +15,6 @@ const PHONE_STRIP_RE = /[^\d+\-\s]/g;
 export type RegisterPersonInput = {
   key: string;
   is_school_admin: boolean | null;
-  profile_id: string;
   title_key: string;
   title_other_en: string;
   title_other_th: string;
@@ -26,13 +30,13 @@ export type RegisterPersonInput = {
   line_id: string;
   email: string;
   position: string;
+  position_other: string;
   ict_talent_cohort: string;
   ict_survey: IctSurvey;
 };
 
 export const PERSON_FIELD_ORDER = [
   "is_school_admin",
-  "profile_id",
   "title_key",
   "title_other_th",
   "title_other_en",
@@ -48,6 +52,7 @@ export const PERSON_FIELD_ORDER = [
   "line_id",
   "email",
   "position",
+  "position_other",
   "ict_talent_cohort",
   ...ICT_SURVEY_SECTIONS.map((section) => `survey:${section.key}`),
   "survey:sms_usage",
@@ -94,14 +99,6 @@ export function validatePersonField(
       if (person.is_school_admin && admins.length > 1 && admins[0]?.key !== person.key) {
         return "ระบุผู้จัดการข้อมูลสถานศึกษาได้เพียง 1 คนต่อครั้งการลงทะเบียน";
       }
-      return null;
-    }
-    case "profile_id": {
-      const id = person.profile_id.trim();
-      if (!id) return "กรุณากรอกเลขบัตรประชาชน";
-      if (!NATIONAL_ID_RE.test(id)) return "เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก";
-      const dup = people.filter((p) => p.profile_id.trim() === id);
-      if (dup.length > 1 && dup[0]?.key !== person.key) return `เลขบัตรประชาชน ${id} ซ้ำในฟอร์ม`;
       return null;
     }
     case "title_key":
@@ -172,7 +169,14 @@ export function validatePersonField(
     }
     case "position":
       if (!person.position.trim()) return "กรุณาเลือกตำแหน่ง";
-      if (!(POSITION_OPTIONS as readonly string[]).includes(person.position.trim())) return "ตำแหน่งไม่ถูกต้อง";
+      if (person.position.trim() !== POSITION_OTHER && !isListedPosition(person.position)) {
+        return "ตำแหน่งไม่ถูกต้อง";
+      }
+      return null;
+    case "position_other":
+      if (person.position.trim() !== POSITION_OTHER) return null;
+      if (!person.position_other.trim()) return "กรุณาระบุตำแหน่ง";
+      if (person.position_other.trim().length > POSITION_OTHER_MAX) return "ตำแหน่งยาวเกินไป";
       return null;
     case "ict_talent_cohort":
       return person.ict_talent_cohort ? null : "กรุณาเลือกประวัติ ICT Talent";
@@ -215,6 +219,9 @@ export function collectPersonErrors(
   for (const person of people) {
     for (const field of PERSON_FIELD_ORDER) {
       if ((field === "title_other_th" || field === "title_other_en") && person.title_key !== "other") {
+        continue;
+      }
+      if (field === "position_other" && person.position.trim() !== POSITION_OTHER) {
         continue;
       }
       const message = validatePersonField(person, field, people);

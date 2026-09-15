@@ -5,7 +5,14 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { useIctStore } from "@/contexts/IctStore";
-import { POSITION_OPTIONS } from "@/lib/registrationOptions";
+import {
+  POSITION_OPTIONS,
+  POSITION_OTHER,
+  POSITION_OTHER_MAX,
+  isListedPosition,
+  positionFormState,
+  storedPositionFields,
+} from "@/lib/registrationOptions";
 import { getSchoolProfileForAdmin, updateSchoolProfileRpc } from "@/lib/supabase/data";
 import { inputClass } from "@/lib/styles";
 import {
@@ -34,7 +41,9 @@ function PersonalProfileForm({ candidate }: { candidate: Candidate }) {
   const [engFirstName, setEngFirstName] = useState(candidate.eng_first_name || "");
   const [engLastName, setEngLastName] = useState(candidate.eng_last_name || "");
   const [phone, setPhone] = useState(candidate.phone || "");
-  const [position, setPosition] = useState(candidate.position || "");
+  const initialPosition = positionFormState(candidate.position, candidate.position_other);
+  const [position, setPosition] = useState(initialPosition.position);
+  const [positionOther, setPositionOther] = useState(initialPosition.positionOther);
   const [lineId, setLineId] = useState(candidate.line_id || "");
   const [email, setEmail] = useState(candidate.email || "");
   const [saving, setSaving] = useState(false);
@@ -68,13 +77,22 @@ function PersonalProfileForm({ candidate }: { candidate: Candidate }) {
       setError("กรุณากรอกชื่อ นามสกุล และเบอร์โทรศัพท์ให้ครบถ้วน");
       return;
     }
-    if (position && !(POSITION_OPTIONS as readonly string[]).includes(position)) {
+    if (position === POSITION_OTHER && !positionOther.trim()) {
+      setError("กรุณาระบุตำแหน่ง");
+      return;
+    }
+    if (position === POSITION_OTHER && positionOther.trim().length > POSITION_OTHER_MAX) {
+      setError("ตำแหน่งยาวเกินไป");
+      return;
+    }
+    if (position && position !== POSITION_OTHER && !isListedPosition(position)) {
       setError("กรุณาเลือกตำแหน่งจากรายการ");
       return;
     }
 
     const title_en = titleKey === "other" ? titleOtherEn.trim() : titleOpt?.en || "";
     const title_th = titleKey === "other" ? titleOtherTh.trim() : titleOpt?.th || "";
+    const storedPosition = storedPositionFields(position, positionOther);
 
     setSaving(true);
     const res = await updateCandidateProfile(candidate.id, {
@@ -88,7 +106,8 @@ function PersonalProfileForm({ candidate }: { candidate: Candidate }) {
       eng_first_name: engFirstName.trim(),
       eng_last_name: engLastName.trim(),
       phone: phone.trim(),
-      position: position.trim(),
+      position: storedPosition.position,
+      position_other: storedPosition.position_other,
       line_id: lineId.trim(),
       email: email.trim(),
     });
@@ -105,7 +124,7 @@ function PersonalProfileForm({ candidate }: { candidate: Candidate }) {
     <form onSubmit={handleSubmit} className="space-y-5">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-100 text-xs">
         <div>
-          <span className="block font-medium text-gray-400 mb-0.5">เลขบัตรประชาชน (ล็อก)</span>
+          <span className="block font-medium text-gray-400 mb-0.5">หมายเลขสมาชิก (ล็อก)</span>
           <span className="font-bold text-gray-700 tracking-wide">{candidate.id}</span>
         </div>
         <div>
@@ -221,17 +240,38 @@ function PersonalProfileForm({ candidate }: { candidate: Candidate }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">ตำแหน่ง</label>
-          <select className={inputClass} value={position} onChange={(e) => setPosition(e.target.value)}>
+          <select
+            className={inputClass}
+            value={position}
+            onChange={(e) => {
+              const next = e.target.value;
+              setPosition(next);
+              if (next !== POSITION_OTHER) setPositionOther("");
+            }}
+          >
             <option value="">-- เลือก --</option>
             {POSITION_OPTIONS.map((pos) => (
               <option key={pos} value={pos}>
                 {pos}
               </option>
             ))}
-            {position && !(POSITION_OPTIONS as readonly string[]).includes(position) && (
-              <option value={position}>{position} (เดิม)</option>
-            )}
+            <option value={POSITION_OTHER}>{POSITION_OTHER}</option>
           </select>
+          {position === POSITION_OTHER && (
+            <div className="mt-3">
+              <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                ระบุตำแหน่ง <span className="text-red-500">*</span>
+              </label>
+              <input
+                className={inputClass}
+                value={positionOther}
+                maxLength={POSITION_OTHER_MAX}
+                placeholder="กรุณาระบุตำแหน่ง"
+                required
+                onChange={(e) => setPositionOther(e.target.value)}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -251,7 +291,7 @@ function PersonalProfileForm({ candidate }: { candidate: Candidate }) {
             onChange={(e) => setEmail(e.target.value)}
           />
           <p className="text-xs text-gray-400 mt-1">
-            แก้ไขได้เอง — Login ID เปลี่ยนได้เฉพาะผู้ดูแลระบบ
+           E-mail Login ของคุณจะยังคงเป็นอันเดิม หากต้องการแก้ไข กรุณาติดต่อ Admin
           </p>
         </div>
       </div>

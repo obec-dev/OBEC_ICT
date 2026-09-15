@@ -9,6 +9,9 @@ import {
   ICT_SURVEY_SECTIONS,
   ICT_TALENT_COHORT_OPTIONS,
   POSITION_OPTIONS,
+  POSITION_OTHER,
+  POSITION_OTHER_MAX,
+  storedPositionFields,
   SMS_USAGE_OPTIONS,
   type IctSurvey,
   type IctTalentCohort,
@@ -49,7 +52,6 @@ function FieldError({ message }: { message?: string }) {
 type PersonDraft = {
   key: string;
   is_school_admin: boolean | null;
-  profile_id: string;
   title_key: TitleKey | "";
   title_other_en: string;
   title_other_th: string;
@@ -65,6 +67,7 @@ type PersonDraft = {
   line_id: string;
   email: string;
   position: string;
+  position_other: string;
   duty: string;
   ict_talent_cohort: IctTalentCohort | "";
   ict_survey: IctSurvey;
@@ -97,7 +100,6 @@ function emptyPerson(): PersonDraft {
   return {
     key: crypto.randomUUID(),
     is_school_admin: null,
-    profile_id: "",
     title_key: "",
     title_other_en: "",
     title_other_th: "",
@@ -113,6 +115,7 @@ function emptyPerson(): PersonDraft {
     line_id: "",
     email: "",
     position: "",
+    position_other: "",
     duty: "",
     ict_talent_cohort: "",
     ict_survey: {
@@ -366,13 +369,14 @@ export default function RegisterFormPage() {
       const birth_date = buildBirthDate(p.birth_day, p.birth_month, p.birth_year)!;
       const title_en = p.title_key === "other" ? p.title_other_en.trim() : title.en;
       const title_th = p.title_key === "other" ? p.title_other_th.trim() : title.th;
+      const storedPosition = storedPositionFields(p.position, p.position_other);
       const displayLabel =
         p.title_key === "other"
           ? `${p.title_other_th.trim()} ${p.first_name} ${p.last_name}`
           : `${title.th} ${p.first_name} ${p.last_name}`;
 
       const result = await registerCandidate({
-        profile_id: p.profile_id.trim(),
+        profile_id: "",
         school_id: matched.school_id,
         first_name: p.first_name.trim(),
         last_name: p.last_name.trim(),
@@ -380,13 +384,14 @@ export default function RegisterFormPage() {
         title_key: p.title_key,
         title_en,
         title_th,
-        title_other_en: p.title_key === "other" ? p.title_other_en.trim() : undefined,
-        title_other_th: p.title_key === "other" ? p.title_other_th.trim() : undefined,
+        title_other_en: p.title_key === "other" ? title_en : "",
+        title_other_th: p.title_key === "other" ? title_th : "",
         eng_first_name: p.eng_first_name.trim(),
         eng_last_name: p.eng_last_name.trim(),
         birth_date,
         gender: p.gender,
-        position: p.position.trim(),
+        position: storedPosition.position,
+        position_other: storedPosition.position_other,
         duty: "",
         line_id: p.line_id.trim(),
         email: p.email.trim(),
@@ -610,30 +615,6 @@ export default function RegisterFormPage() {
                     </div>
 
                     <div
-                      data-field={fieldId(person.key, "profile_id")}
-                      data-invalid={err(person.key, "profile_id") ? "true" : undefined}
-                    >
-                      <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                        เลขบัตรประชาชน
-                        <RequiredMark />
-                      </label>
-                      <input
-                        className={inputClass}
-                        required
-                        inputMode="numeric"
-                        maxLength={13}
-                        value={person.profile_id}
-                        disabled={submitting}
-                        onChange={(e) =>
-                          updatePerson(person.key, {
-                            profile_id: e.target.value.replace(/\D/g, "").slice(0, 13),
-                          })
-                        }
-                      />
-                      <FieldError message={err(person.key, "profile_id")} />
-                    </div>
-
-                    <div
                       data-field={fieldId(person.key, "title_key")}
                       data-invalid={err(person.key, "title_key") ? "true" : undefined}
                     >
@@ -695,7 +676,7 @@ export default function RegisterFormPage() {
                             required
                             value={person.title_other_en}
                             disabled={submitting}
-                            placeholder="Please specify"
+                            placeholder="กรุณาระบุ"
                             onChange={(e) =>
                               updatePerson(person.key, {
                                 title_other_en: filterEnglishOnly(e.target.value),
@@ -974,7 +955,13 @@ export default function RegisterFormPage() {
                         required
                         value={person.position}
                         disabled={submitting}
-                        onChange={(e) => updatePerson(person.key, { position: e.target.value })}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          updatePerson(person.key, {
+                            position: next,
+                            ...(next !== POSITION_OTHER ? { position_other: "" } : {}),
+                          });
+                        }}
                       >
                         <option value="">-- เลือก --</option>
                         {POSITION_OPTIONS.map((pos) => (
@@ -982,8 +969,33 @@ export default function RegisterFormPage() {
                             {pos}
                           </option>
                         ))}
+                        <option value={POSITION_OTHER}>{POSITION_OTHER}</option>
                       </select>
                       <FieldError message={err(person.key, "position")} />
+                      {person.position === POSITION_OTHER && (
+                        <div
+                          className="mt-3"
+                          data-field={fieldId(person.key, "position_other")}
+                          data-invalid={err(person.key, "position_other") ? "true" : undefined}
+                        >
+                          <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                            ระบุตำแหน่ง
+                            <RequiredMark />
+                          </label>
+                          <input
+                            className={inputClass}
+                            required
+                            maxLength={POSITION_OTHER_MAX}
+                            value={person.position_other}
+                            disabled={submitting}
+                            placeholder="กรุณาระบุตำแหน่ง"
+                            onChange={(e) =>
+                              updatePerson(person.key, { position_other: e.target.value })
+                            }
+                          />
+                          <FieldError message={err(person.key, "position_other")} />
+                        </div>
+                      )}
                     </div>
 
                     <div

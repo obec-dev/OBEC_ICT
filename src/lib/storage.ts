@@ -28,7 +28,15 @@ export function readPersistedState(): IctPersistedState | null {
 }
 
 export function writePersistedState(state: IctPersistedState) {
-  writeJson(STORAGE_KEYS.state, state);
+  writeJson(STORAGE_KEYS.state, { ...state, examProgress: [] });
+}
+
+/** Drop saved exam answers from local cache. Answers must come from the database, not the browser. */
+export function clearStoredExamAnswers() {
+  if (typeof window === "undefined") return;
+  const state = readPersistedState();
+  if (!state?.examProgress?.length) return;
+  writePersistedState({ ...state, examProgress: [] });
 }
 
 export function readSession(): SessionUser | null {

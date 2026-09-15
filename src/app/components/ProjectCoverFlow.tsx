@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, type CSSProperties } from "react";
 import { useTheme } from "@/app/components/ThemeProvider";
+import { candidatePortalHome } from "@/lib/examAccess";
 import { useIctStore } from "@/contexts/IctStore";
 import {
   getProjectActivityBadges,
@@ -37,8 +38,12 @@ function coverStyle(project: LearningProject, isDark: boolean): CSSProperties {
   return { background: DEFAULT_GRADIENT };
 }
 
-function primaryHref(project: LearningProject, hasSession: boolean): string {
-  if (hasSession) return "/portal/learn";
+function primaryHref(
+  project: LearningProject,
+  hasSession: boolean,
+  portalHome = "/portal/learn"
+): string {
+  if (hasSession) return portalHome;
   if (getProjectRegistrationStatus(project).open) return "/register/consent";
   if (getProjectExamStatus(project).open) return "/login";
   return "/login";
@@ -52,10 +57,14 @@ export function ProjectCoverFlow({
   projects: LearningProject[];
   hasSession?: boolean;
 }) {
-  const { session, getExamFor } = useIctStore();
+  const { session, getExamFor, examProgress, projects: allProjects } = useIctStore();
   const { theme } = useTheme();
   const isDark = theme === "dark";
   const project = useMemo(() => getSiteProject(projects), [projects]);
+  const portalHome = useMemo(
+    () => candidatePortalHome(session, examProgress, allProjects.length ? allProjects : projects),
+    [session, examProgress, allProjects, projects]
+  );
   if (!project || project.is_active === false) return null;
 
   const badges = getProjectActivityBadges(project);
@@ -63,9 +72,9 @@ export function ProjectCoverFlow({
   const exam = candidate ? getExamFor(candidate.id, project.id) : undefined;
   const showPassBadge =
     Boolean(hasSession) &&
-    project.enable_results_visibility === true &&
     exam?.passed === true &&
     Boolean(exam.graded_at);
+  const href = primaryHref(project, hasSession, portalHome);
 
   return (
     <section
@@ -99,7 +108,7 @@ export function ProjectCoverFlow({
                 <p className="text-sm md:text-base text-white/90 mt-2 max-w-2xl line-clamp-2">{project.description}</p>
               )}
               <Link
-                href={primaryHref(project, hasSession)}
+                href={href}
                 className="inline-flex mt-5 rounded-full bg-white text-[var(--primary-blue)] px-6 py-2.5 text-sm font-bold hover:bg-blue-50 transition-colors"
               >
                 {hasSession

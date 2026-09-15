@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { AnswerKeyCsvImport } from "@/app/components/admin/AnswerKeyCsvImport";
+import { ExamAnswerTree } from "@/app/components/admin/ExamAnswerTree";
+import { ExamQuestionTree } from "@/app/components/admin/ExamQuestionTree";
+import { ExamSectionManager } from "@/app/components/admin/ExamSectionManager";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { ModalOverlay } from "@/app/components/ModalOverlay";
@@ -20,8 +24,10 @@ import {
 } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
 import { numberInputGuards, sumGradedMaxScore } from "@/lib/numberInput";
-import { extractYouTubeId, parseAnswerKeysCsv } from "@/lib/supabase/projects";
-import type { LearningProject, PassThresholdMode, ProjectQuestion, ProjectVideo, QuestionType } from "@/types/ict";
+import { canonicalMcqValue } from "@/lib/answerKeys";
+import { examQuestionDraftSchema } from "@/lib/schemas/examQuestion";
+import { extractYouTubeId } from "@/lib/supabase/projects";
+import type { ExamSection, LearningProject, PassThresholdMode, ProjectQuestion, ProjectVideo, QuestionType } from "@/types/ict";
 
 function emptyProjectForm(): LearningProject {
   return {
@@ -50,8 +56,8 @@ function ProjectsManagementContent() {
     deleteProjectVideo,
     saveProjectQuestion,
     deleteProjectQuestion,
-    bulkSaveAnswerKeys,
     gradeProjectExams,
+    bulkSaveAnswerKeys,
   } = useIctStore();
 
   const siteProject = getSiteProject(projects);
@@ -91,25 +97,25 @@ function ProjectsManagementContent() {
     image_url: string;
     points: number;
     answer_required: boolean;
+    section_id: string;
   }>({
     id: "",
     project_id: selectedProjectId,
     prompt: "",
     type: "mcq",
     options: ["ตัวเลือก 1", "ตัวเลือก 2", "ตัวเลือก 3", "ตัวเลือก 4"],
-    correct_answer: "ตัวเลือก 1",
+    correct_answer: "",
     model_answer: "",
     image_url: "",
     points: 1,
     answer_required: true,
+    section_id: "",
   });
   const [isEditingQ, setIsEditingQ] = useState(false);
-
-  // CSV Answer Keys Upload State
-  const [csvParsed, setCsvParsed] = useState<{ questionIdOrOrder: string; correctAnswer: string }[]>([]);
+  const [examSections, setExamSections] = useState<ExamSection[]>([]);
 
   // Grading Result Modal State
-  const [gradingResult, setGradingResult] = useState<{ gradedCount: number; passedCount: number } | null>(null);
+  const [gradingResult, setGradingResult] = useState<{ gradedCount: number; passedCount: number; pendingCount: number } | null>(null);
   const [isGrading, setIsGrading] = useState(false);
 
   const currentProject = siteProject;
@@ -220,17 +226,37 @@ function ProjectsManagementContent() {
       showStatus("กรุณากรอกโจทย์/คำถาม", true);
       return;
     }
-    const payload: ProjectQuestion = {
+    const options = qForm.type === "mcq" ? qForm.options.filter((o) => o.trim() !== "") : undefined;
+    const draft = examQuestionDraftSchema.safeParse({
       id: qForm.id || crypto.randomUUID(),
       project_id: selectedProjectId,
       prompt: qForm.prompt.trim(),
       type: qForm.type,
-      options: qForm.type === "mcq" ? qForm.options.filter((o) => o.trim() !== "") : undefined,
-      correct_answer: qForm.type === "mcq" ? qForm.correct_answer : undefined,
+      correct_answer:
+        qForm.type === "mcq"
+          ? canonicalMcqValue(qForm.correct_answer, options || []) || qForm.correct_answer
+          : projectQuestions.find((question) => question.id === qForm.id)?.correct_answer,
+    });
+    if (!draft.success) {
+      showStatus(draft.error.issues[0]?.message || "ข้อมูลคำถามไม่ถูกต้อง", true);
+      return;
+    }
+    const payload: ProjectQuestion = {
+      id: draft.data.id,
+      project_id: draft.data.project_id,
+      prompt: draft.data.prompt,
+      type: draft.data.type,
+      options,
+      correct_answer: draft.data.correct_answer,
+      question_code: projectQuestions.find((question) => question.id === draft.data.id)?.question_code,
       model_answer: qForm.type === "open_ended" ? qForm.model_answer.trim() : undefined,
       image_url: qForm.image_url.trim() || null,
       points: Number.isFinite(Number(qForm.points)) ? Math.max(0, Number(qForm.points)) : 1,
       answer_required: qForm.answer_required !== false,
+      section_id: qForm.section_id || null,
+      section_title: examSections.find((section) => section.id === qForm.section_id)?.title ?? null,
+      section_description: examSections.find((section) => section.id === qForm.section_id)?.description ?? null,
+      section_order: examSections.find((section) => section.id === qForm.section_id)?.section_order ?? null,
       order_index: isEditingQ
         ? projectQuestions.find((q) => q.id === qForm.id)?.order_index ?? projectQuestions.length + 1
         : projectQuestions.length + 1,
@@ -245,38 +271,50 @@ function ProjectsManagementContent() {
     }
   };
 
+  const openQuestionForm = (sectionId: string, existing?: ProjectQuestion) => {
+    setQForm({
+      id: existing?.id || crypto.randomUUID(),
+      project_id: selectedProjectId,
+      prompt: existing?.prompt || "",
+      type: existing?.type || "mcq",
+      options: existing?.options && existing.options.length > 0 ? existing.options : ["ตัวเลือก 1", "ตัวเลือก 2", "ตัวเลือก 3", "ตัวเลือก 4"],
+      correct_answer: existing?.correct_answer || "",
+      model_answer: existing?.model_answer || "",
+      image_url: existing?.image_url || "",
+      points: typeof existing?.points === "number" ? existing.points : 1,
+      answer_required: existing ? existing.answer_required !== false : true,
+      section_id: existing?.section_id || sectionId,
+    });
+    setIsEditingQ(Boolean(existing));
+    setShowQuestionModal(true);
+  };
+
+  const moveQuestion = async (question: ProjectQuestion, direction: -1 | 1) => {
+    const siblings = projectQuestions
+      .filter((item) => (item.section_id || "") === (question.section_id || ""))
+      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+    const index = siblings.findIndex((item) => item.id === question.id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= siblings.length) return;
+    const swapped = [...siblings];
+    const [item] = swapped.splice(index, 1);
+    swapped.splice(target, 0, item);
+    for (let i = 0; i < swapped.length; i++) {
+      const next = { ...swapped[i], order_index: i + 1 };
+      const res = await saveProjectQuestion(next);
+      if (!res.ok) {
+        showStatus(res.error, true);
+        return;
+      }
+    }
+    showStatus("จัดลำดับคำถามแล้ว เลขข้อทั้งชุดจะเรียงตามส่วน");
+  };
+
   const handleDeleteQuestion = async (id: string) => {
     if (confirm("ลบข้อสอบข้อนี้?")) {
       const res = await deleteProjectQuestion(id);
       if (res.ok) showStatus("ลบข้อสอบเรียบร้อยแล้ว");
       else showStatus(res.error, true);
-    }
-  };
-
-  // CSV Answer Keys Upload Handlers
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      const parsed = parseAnswerKeysCsv(text);
-      setCsvParsed(parsed);
-    };
-    reader.readAsText(file);
-  };
-
-  const handleApplyCsvAnswerKeys = async () => {
-    if (csvParsed.length === 0) {
-      showStatus("ไม่พบข้อมูลเฉลยคำตอบในไฟล์ CSV", true);
-      return;
-    }
-    const res = await bulkSaveAnswerKeys(selectedProjectId, csvParsed);
-    if (res.ok) {
-      showStatus(`อัปเดตเฉลยคำตอบจาก CSV สำเร็จ ${res.updatedCount} ข้อ`);
-      setCsvParsed([]);
-    } else {
-      showStatus(res.error, true);
     }
   };
 
@@ -288,8 +326,16 @@ function ProjectsManagementContent() {
       const res = await gradeProjectExams(selectedProjectId);
       setIsGrading(false);
       if (res.ok) {
-        setGradingResult({ gradedCount: res.gradedCount, passedCount: res.passedCount });
-        showStatus("ประมวลผลการตรวจคำตอบเรียบร้อยแล้ว");
+        setGradingResult({
+          gradedCount: res.gradedCount,
+          passedCount: res.passedCount,
+          pendingCount: res.pendingCount,
+        });
+        showStatus(
+          res.pendingCount > 0
+            ? `ประมวลผลแล้ว โดยยังไม่ตรวจ ${res.pendingCount} ข้อที่ไม่มีเฉลย`
+            : "ประมวลผลการตรวจคำตอบเรียบร้อยแล้ว"
+        );
       } else {
         showStatus(res.error, true);
       }
@@ -313,7 +359,7 @@ function ProjectsManagementContent() {
           <input
             type="text"
             className={inputClass}
-            placeholder="e.g. โครงการพัฒนาศักยภาพตัวแทน ICT"
+            placeholder="เช่น โครงการพัฒนาศักยภาพตัวแทน ICT"
             value={form.name}
             onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
           />
@@ -923,144 +969,36 @@ function ProjectsManagementContent() {
                     <div>
                       <h2 className="text-xl font-bold text-gray-800">สร้างโจทย์คำถาม</h2>
                       <p className="text-xs text-gray-500">
-                        สร้างคำถามและตัวเลือก (ผู้สมัครจะไม่เห็นเฉลยคำตอบในหน้าสอบ เพื่อป้องกันการเจาะ DevTools)
+                        สร้างคำถามและตัวเลือก
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setQForm({
-                          id: crypto.randomUUID(),
-                          project_id: selectedProjectId,
-                          prompt: "",
-                          type: "mcq",
-                          options: ["ตัวเลือก 1", "ตัวเลือก 2", "ตัวเลือก 3", "ตัวเลือก 4"],
-                          correct_answer: "1",
-                          model_answer: "",
-                          image_url: "",
-                          points: 1,
-                          answer_required: true,
-                        });
-                        setIsEditingQ(false);
-                        setShowQuestionModal(true);
-                      }}
-                      className="px-5 py-2.5 rounded-full bg-[var(--accent-red)] text-white text-sm font-bold shadow hover:bg-red-700"
-                    >
-                      + เพิ่มคำถามใหม่
-                    </button>
+                    <p className="max-w-xs text-right text-xs text-gray-500">
+                      แนะนำให้สร้าง section ก่อนแล้วค่อยเพิ่มคำถาม
+                    </p>
                   </div>
 
-                  {projectQuestions.length === 0 ? (
-                    <div className="p-12 text-center text-gray-400 bg-gray-50 rounded-2xl border border-dashed">
-                      ยังไม่มีข้อสอบในวิชานี้ กด “+ เพิ่มคำถามใหม่” เพื่อสร้างข้อสอบ
-                    </div>
-                  ) : (
-                    <div className="space-y-6">
-                      {projectQuestions.map((q, idx) => (
-                        <div key={q.id} className="p-6 rounded-2xl border border-gray-200 bg-white shadow-xs">
-                          <div className="flex justify-between items-start mb-3">
-                            <div className="flex items-center gap-3 flex-wrap">
-                              <span className="w-8 h-8 rounded-full bg-blue-100 text-[var(--primary-blue)] font-bold text-sm flex items-center justify-center">
-                                {idx + 1}
-                              </span>
-                              <span
-                                className={`text-xs font-bold px-3 py-1 rounded-full uppercase ${
-                                  q.type === "mcq"
-                                    ? "bg-purple-50 text-purple-700 border border-purple-200"
-                                    : "bg-amber-50 text-amber-700 border border-amber-200"
-                                }`}
-                              >
-                                {q.type === "mcq" ? "choice" : "open"}
-                              </span>
-                              <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2.5 py-0.5 rounded-md">
-                                {typeof q.points === "number" ? q.points : 1} คะแนน
-                              </span>
-                              <span
-                                className={`text-xs font-bold px-2.5 py-0.5 rounded-md ${
-                                  q.answer_required !== false
-                                    ? "bg-red-50 text-red-700 border border-red-100"
-                                    : "bg-slate-50 text-slate-500 border border-slate-200"
-                                }`}
-                              >
-                                {q.answer_required !== false ? "บังคับตอบ" : "ไม่บังคับตอบ"}
-                              </span>
-                            </div>
+                  <ExamSectionManager projectId={selectedProjectId} onChange={setExamSections} />
 
-                            <div className="flex gap-2 flex-wrap justify-end">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void saveProjectQuestion({
-                                    ...q,
-                                    answer_required: q.answer_required === false,
-                                  }).then((res) => {
-                                    if (res.ok) {
-                                      showStatus(
-                                        q.answer_required === false
-                                          ? "ตั้งเป็นบังคับตอบแล้ว"
-                                          : "ยกเลิกการบังคับตอบแล้ว"
-                                      );
-                                    } else {
-                                      showStatus(res.error || "อัปเดตไม่สำเร็จ", true);
-                                    }
-                                  });
-                                }}
-                                className={`text-xs font-bold px-3 py-1.5 rounded-lg ${
-                                  q.answer_required !== false
-                                    ? "text-red-700 bg-red-50 hover:bg-red-100"
-                                    : "text-slate-600 bg-slate-100 hover:bg-slate-200"
-                                }`}
-                              >
-                                {q.answer_required !== false ? "✓ บังคับตอบ" : "+ ตั้งบังคับตอบ"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setQForm({
-                                    id: q.id,
-                                    project_id: q.project_id || selectedProjectId,
-                                    prompt: q.prompt,
-                                    type: q.type,
-                                    options: q.options && q.options.length > 0 ? q.options : ["ตัวเลือก 1", "ตัวเลือก 2"],
-                                    correct_answer: q.correct_answer || "1",
-                                    model_answer: q.model_answer || "",
-                                    image_url: q.image_url || "",
-                                    points: typeof q.points === "number" ? q.points : 1,
-                                    answer_required: q.answer_required !== false,
-                                  });
-                                  setIsEditingQ(true);
-                                  setShowQuestionModal(true);
-                                }}
-                                className="text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg"
-                              >
-                                ✏️ แก้ไขโจทย์
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteQuestion(q.id)}
-                                className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg"
-                              >
-                                🗑️ ลบ
-                              </button>
-                            </div>
-                          </div>
-
-                          <h3 className="text-base font-bold text-gray-800 mb-3 pl-11">{q.prompt}</h3>
-                          {q.image_url && (
-                            <div className="pl-11 mb-2">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={q.image_url}
-                                alt={`ภาพประกอบข้อ ${idx + 1}`}
-                                className="max-h-40 rounded-xl border border-gray-200 object-contain bg-gray-50"
-                              />
-                              <p className="text-[10px] font-mono text-gray-400 mt-1 truncate max-w-md">{q.image_url}</p>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <ExamQuestionTree
+                    sections={examSections}
+                    questions={projectQuestions}
+                    onAddQuestion={(sectionId) => openQuestionForm(sectionId)}
+                    onEditQuestion={(question) => openQuestionForm(question.section_id || "", question)}
+                    onDeleteQuestion={(id) => void handleDeleteQuestion(id)}
+                    onToggleRequired={(question) => {
+                      void saveProjectQuestion({
+                        ...question,
+                        answer_required: question.answer_required === false,
+                      }).then((res) => {
+                        if (res.ok) {
+                          showStatus(question.answer_required === false ? "ตั้งเป็นบังคับตอบแล้ว" : "ยกเลิกการบังคับตอบแล้ว");
+                        } else {
+                          showStatus(res.error || "อัปเดตไม่สำเร็จ", true);
+                        }
+                      });
+                    }}
+                    onMoveQuestion={(question, direction) => void moveQuestion(question, direction)}
+                  />
                 </div>
               )}
 
@@ -1089,104 +1027,24 @@ function ProjectsManagementContent() {
                     </div>
                   </div>
 
-                  <div className="bg-emerald-50/50 p-6 rounded-2xl border border-emerald-200 mb-8">
-                    <h3 className="font-bold text-emerald-900 text-base mb-2">📁 อัปโหลดเฉลยคำตอบผ่านไฟล์ CSV</h3>
-                    <p className="text-xs text-gray-600 mb-4">
-                      รูปแบบ CSV จะเป็น 2 คอลัมน์: <code>ลำดับข้อ,หมายเลขตัวเลือก</code> (ตัวอย่าง: <code>1,2</code> หรือ <code>2,4</code> หรือ <code>3,1</code>)
-                    </p>
-
-                    <div className="flex flex-col sm:flex-row items-center gap-3">
-                      <input
-                        type="file"
-                        accept=".csv,.txt"
-                        onChange={handleFileUpload}
-                        className="text-xs file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 cursor-pointer"
-                      />
-
-                      {csvParsed.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => void handleApplyCsvAnswerKeys()}
-                          className="px-5 py-2 rounded-full bg-emerald-800 text-white text-xs font-bold shadow hover:bg-emerald-900"
-                        >
-                          ยืนยันการนำเข้าเฉลย ({csvParsed.length} ข้อ)
-                        </button>
-                      )}
-                    </div>
-
-                    {csvParsed.length > 0 && (
-                      <div className="mt-4 bg-white rounded-xl border border-emerald-200 p-4 max-h-48 overflow-y-auto">
-                        <h4 className="text-xs font-bold text-emerald-800 mb-2">ตัวอย่างข้อมูลเฉลยจาก CSV:</h4>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          {csvParsed.map((item, idx) => (
-                            <div key={idx} className="p-2 bg-gray-50 rounded border flex justify-between">
-                              <span className="font-mono text-gray-500">ข้อที่ {item.questionIdOrOrder}:</span>
-                              <span className="font-bold text-emerald-700">ตัวเลือกที่ {item.correctAnswer}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <AnswerKeyCsvImport
+                    projectId={selectedProjectId}
+                    questions={projectQuestions}
+                    sections={examSections}
+                    onApply={(updates) => bulkSaveAnswerKeys(selectedProjectId, updates)}
+                    onStatus={showStatus}
+                  />
 
                   <h3 className="font-bold text-gray-800 text-lg mb-4">📝 กำหนดเฉลยคำตอบรายข้อ</h3>
-                  <div className="space-y-4">
-                    {projectQuestions.map((q, idx) => {
-                      const selectedChoice = (() => {
-                        if (!q.correct_answer) return "";
-                        if (/^\d+$/.test(q.correct_answer)) return q.correct_answer;
-                        const matchIdx = q.options?.indexOf(q.correct_answer);
-                        return matchIdx !== undefined && matchIdx >= 0 ? String(matchIdx + 1) : q.correct_answer;
-                      })();
-                      const typeLabel = q.type === "mcq" ? "choice" : "open";
-
-                      return (
-                        <div key={q.id} className="p-5 rounded-2xl border border-gray-200 bg-white flex flex-col md:flex-row md:items-center justify-between gap-4">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-bold text-sm text-[var(--primary-blue)]">
-                                ข้อที่ {idx + 1} [{typeLabel}]
-                              </span>
-                            </div>
-                            <p className="text-sm font-semibold text-gray-700">{q.prompt}</p>
-                          </div>
-
-                          <div className="w-full md:w-72 shrink-0">
-                            <label className="block text-xs font-bold text-emerald-900 mb-1">เฉลยคำตอบ (Correct Choice):</label>
-                            {q.type === "mcq" && q.options && q.options.length > 0 ? (
-                              <select
-                                className={`${inputClass} text-xs font-bold text-emerald-800 border-emerald-300 bg-emerald-50/50`}
-                                value={selectedChoice}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  void saveProjectQuestion({ ...q, correct_answer: val });
-                                  showStatus(`อัปเดตเฉลยข้อ ${idx + 1} เป็นตัวเลือกที่ ${val}`);
-                                }}
-                              >
-                                <option value="">-- เลือกเฉลยคำตอบ --</option>
-                                {q.options.map((opt, optIdx) => (
-                                  <option key={optIdx} value={String(optIdx + 1)}>
-                                    ตัวเลือกที่ {optIdx + 1}: {opt}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <input
-                                type="text"
-                                className={`${inputClass} text-xs border-emerald-300`}
-                                placeholder="กรอกคำตอบเฉลย..."
-                                value={q.correct_answer || ""}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  void saveProjectQuestion({ ...q, correct_answer: val });
-                                }}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <p className="mb-3 text-xs text-gray-500">เลขข้อเรียงตามลำดับส่วน แล้วตามลำดับคำถามในส่วน</p>
+                  <ExamAnswerTree
+                    sections={examSections}
+                    questions={projectQuestions}
+                    onSaveAnswer={(question, value) => {
+                      void saveProjectQuestion({ ...question, correct_answer: value });
+                      showStatus(`อัปเดตเฉลยข้อ ${question.globalNumber || ""} แล้ว`);
+                    }}
+                  />
                 </div>
               )}
             </div>
@@ -1231,7 +1089,7 @@ function ProjectsManagementContent() {
                 <input
                   type="text"
                   className={inputClass}
-                  placeholder="e.g. บทเรียนที่ 1: ความรู้พื้นฐานเกี่ยวกับ ICT"
+                  placeholder="เช่น บทเรียนที่ 1: ความรู้พื้นฐานเกี่ยวกับ ICT"
                   value={videoForm.title}
                   onChange={(e) => setVideoForm((prev) => ({ ...prev, title: e.target.value }))}
                 />
@@ -1311,6 +1169,22 @@ function ProjectsManagementContent() {
                     Open-ended (อัตนัย ตอบคำถาม)
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">ส่วนข้อสอบ:</label>
+                <select
+                  className={inputClass}
+                  value={qForm.section_id}
+                  onChange={(e) => setQForm((prev) => ({ ...prev, section_id: e.target.value }))}
+                >
+                  <option value="">ไม่ระบุส่วน</option>
+                  {examSections.map((section, index) => (
+                    <option key={section.id} value={section.id}>
+                      ส่วนที่ {index + 1}: {section.title}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -1457,6 +1331,11 @@ function ProjectsManagementContent() {
             <h3 className="text-2xl font-extrabold text-gray-800 mb-2">ตรวจข้อสอบเรียบร้อยแล้ว</h3>
             <p className="text-gray-500 text-sm mb-6">ผลการประมวลผลคำตอบผู้สอบวิชา {currentProject.name}</p>
 
+            {gradingResult.pendingCount > 0 && (
+              <p className="mb-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                ยังไม่ตรวจ {gradingResult.pendingCount} ข้อที่ยังไม่ได้กำหนดเฉลย ข้อเหล่านี้ไม่ถูกนับคะแนน
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
                 <div className="text-2xl font-extrabold text-gray-800">{gradingResult.gradedCount}</div>

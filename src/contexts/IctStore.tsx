@@ -20,6 +20,7 @@ import {
   fetchSchoolById,
   fetchSchoolTotals,
   insertProfile,
+  fetchMyExamProgress,
   loginCandidateWithPassword,
   logPortalLogout,
   setCandidatePassword,
@@ -28,6 +29,7 @@ import {
   upsertWatchProgressToDb,
 } from "@/lib/supabase/data";
 import {
+  clearStoredExamAnswers,
   readPersistedState,
   readSession,
   writePersistedState,
@@ -80,7 +82,7 @@ function requireAdminToken(session: SessionUser | null): string {
 }
 
 type RegisterInput = {
-  profile_id: string;
+  profile_id?: string;
   school_id: string;
   first_name: string;
   last_name: string;
@@ -96,6 +98,7 @@ type RegisterInput = {
   birth_date: string;
   gender: string;
   position: string;
+  position_other?: string;
   duty: string;
   line_id: string;
   email: string;
@@ -116,6 +119,10 @@ type IctStoreValue = {
   candidates: Candidate[];
   watchProgress: WatchProgress[];
   examProgress: ExamProgress[];
+  /** False until a candidate's exam rows have been loaded from the database. */
+  examProgressReady: boolean;
+  examProgressError: string | null;
+  reloadExamProgress: () => Promise<void>;
   projects: LearningProject[];
   videos: ProjectVideo[];
   questions: ProjectQuestion[];
@@ -129,11 +136,15 @@ type IctStoreValue = {
   deleteProjectQuestion: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   bulkSaveAnswerKeys: (
     projectId: string,
-    keys: { questionIdOrOrder: string; correctAnswer: string }[]
+    keys: { questionId?: string; questionCode?: string; correctAnswer?: string | null }[]
   ) => Promise<{ ok: true; updatedCount: number } | { ok: false; error: string }>;
+  applyLocalAnswerKeys: (keys: { questionId?: string; questionCode?: string; correctAnswer?: string | null }[]) => void;
   gradeProjectExams: (
     projectId: string
-  ) => Promise<{ ok: true; gradedCount: number; passedCount: number } | { ok: false; error: string }>;
+  ) => Promise<
+    | { ok: true; gradedCount: number; passedCount: number; pendingCount: number }
+    | { ok: false; error: string }
+  >;
   session: SessionUser | null;
   currentCandidate: Candidate | null;
   isAdmin: boolean;
@@ -206,6 +217,7 @@ type IctStoreValue = {
         | "eng_first_name"
         | "eng_last_name"
         | "position"
+        | "position_other"
         | "duty"
         | "line_id"
         | "email"
@@ -230,6 +242,8 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [watchProgress, setWatchProgress] = useState<WatchProgress[]>([]);
   const [examProgress, setExamProgress] = useState<ExamProgress[]>([]);
+  const [examProgressReady, setExamProgressReady] = useState(false);
+  const [examProgressError, setExamProgressError] = useState<string | null>(null);
   const [projects, setProjects] = useState<LearningProject[]>(MOCK_PROJECTS);
   const [videos, setVideos] = useState<ProjectVideo[]>(MOCK_VIDEOS);
   const [questions, setQuestions] = useState<ProjectQuestion[]>(MOCK_QUESTIONS);
@@ -281,34 +295,62 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const forgetExamProgress = useCallback(() => {
+    setExamProgress([]);
+    setExamProgressError(null);
+    setExamProgressReady(true);
+    clearStoredExamAnswers();
+  }, []);
+
+  const loadCandidateExamProgress = useCallback(async (candidate: Pick<Candidate, "id" | "phone">) => {
+    setExamProgressReady(false);
+    setExamProgressError(null);
+    try {
+      const rows = await fetchMyExamProgress(candidate.id, candidate.phone);
+      setExamProgress(rows);
+    } catch (err) {
+      setExamProgress([]);
+      setExamProgressError(err instanceof Error ? err.message : "โหลดคำตอบข้อสอบไม่สำเร็จ");
+    } finally {
+      setExamProgressReady(true);
+    }
+  }, []);
+
   useEffect(() => {
     const persisted = readPersistedState();
     if (persisted) {
       setWatchProgress(persisted.watchProgress ?? []);
-      setExamProgress(persisted.examProgress ?? []);
       if (persisted.projects?.length) setProjects(persisted.projects);
       if (persisted.videos?.length) setVideos(persisted.videos);
       if (persisted.questions?.length) setQuestions(stripQuestionKeys(persisted.questions));
     }
+    // Exam answers are confidential and must not be restored from the browser cache.
+    setExamProgress([]);
+    clearStoredExamAnswers();
     const existing = readSession();
     setSession(existing);
     // Re-sync access-role cookie so middleware can enforce path matrix
     writeSession(existing);
     setHydrated(true);
     void refreshData();
-  }, [refreshData]);
+    if (existing?.kind === "candidate") {
+      void loadCandidateExamProgress(existing.candidate);
+    } else {
+      setExamProgressReady(true);
+    }
+  }, [loadCandidateExamProgress, refreshData]);
 
   useEffect(() => {
     if (!hydrated) return;
     const state: IctPersistedState = {
       watchProgress,
-      examProgress,
+      examProgress: [],
       projects,
       videos,
       questions: stripQuestionKeys(questions),
     };
     writePersistedState(state);
-  }, [hydrated, watchProgress, examProgress, projects, videos, questions]);
+  }, [hydrated, watchProgress, projects, videos, questions]);
 
   const persistSession = useCallback((next: SessionUser | null) => {
     setSession(next);
@@ -384,15 +426,16 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   const saveProjectQuestion = useCallback(async (question: ProjectQuestion) => {
     try {
       const token = requireAdminToken(session);
-      await upsertProjectQuestion(token, question);
+      const assignedCode = await upsertProjectQuestion(token, question);
+      const saved = assignedCode ? { ...question, question_code: assignedCode } : question;
       setQuestions((prev) => {
-        const idx = prev.findIndex((q) => q.id === question.id);
+        const idx = prev.findIndex((q) => q.id === saved.id);
         if (idx >= 0) {
           const next = [...prev];
-          next[idx] = question;
+          next[idx] = saved;
           return next;
         }
-        return [...prev, question];
+        return [...prev, saved];
       });
       return { ok: true as const };
     } catch (err) {
@@ -411,45 +454,35 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [session]);
 
+  const applyLocalAnswerKeys = useCallback((keys: { questionId?: string; questionCode?: string; correctAnswer?: string | null }[]) => {
+    setQuestions((prev) =>
+      prev.map((question) => {
+        const match = keys.find(
+          (item) =>
+            (item.questionId && item.questionId === question.id) ||
+            (item.questionCode &&
+              (question.question_code || "").trim().toUpperCase() === item.questionCode.trim().toUpperCase())
+        );
+        if (!match) return question;
+        const nextAnswer = (match.correctAnswer ?? "").trim();
+        return { ...question, correct_answer: nextAnswer || undefined };
+      })
+    );
+  }, []);
+
   const bulkSaveAnswerKeys = useCallback(
-    async (projectId: string, keys: { questionIdOrOrder: string; correctAnswer: string }[]) => {
+    async (projectId: string, keys: { questionId?: string; questionCode?: string; correctAnswer?: string | null }[]) => {
       try {
         const token = requireAdminToken(session);
-        const projQuestions = questions.filter((q) => q.project_id === projectId);
-        let updatedCount = 0;
-        const nextQuestions = [...questions];
-
-        for (const item of keys) {
-          const target = projQuestions.find(
-            (q, index) =>
-              q.id === item.questionIdOrOrder ||
-              String(index + 1) === item.questionIdOrOrder ||
-              String(q.order_index) === item.questionIdOrOrder
-          );
-          if (target) {
-            let finalAnswer = item.correctAnswer;
-            // Map 1-based index (e.g. 1, 2, 3, 4) to option text if target has options
-            if (target.options && target.options.length > 0) {
-              const num = parseInt(item.correctAnswer, 10);
-              if (!Number.isNaN(num) && num >= 1 && num <= target.options.length) {
-                finalAnswer = target.options[num - 1];
-              }
-            }
-
-            const updated = { ...target, correct_answer: finalAnswer };
-            await upsertProjectQuestion(token, updated);
-            const idx = nextQuestions.findIndex((q) => q.id === target.id);
-            if (idx >= 0) nextQuestions[idx] = updated;
-            updatedCount++;
-          }
-        }
-        setQuestions(nextQuestions);
-        return { ok: true as const, updatedCount };
+        const { saveAnswerKeysByQuestionId } = await import("@/lib/supabase/projects");
+        await saveAnswerKeysByQuestionId(token, projectId, keys);
+        applyLocalAnswerKeys(keys);
+        return { ok: true as const, updatedCount: keys.length };
       } catch (err) {
         return { ok: false as const, error: err instanceof Error ? err.message : "อัปเดตเฉลยคำตอบไม่สำเร็จ" };
       }
     },
-    [questions, session]
+    [applyLocalAnswerKeys, session]
   );
 
   const gradeProjectExams = useCallback(
@@ -461,35 +494,24 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           const pts = typeof q.points === "number" ? q.points : 1;
           return pts > 0;
         });
-        const missingKeys = gradedQs.filter((q) => !(q.correct_answer || "").trim());
-        if (missingKeys.length > 0) {
-          return {
-            ok: false as const,
-            error: "กรุณากำหนดเฉลยคำตอบให้ครบทุกข้อก่อนประมวลผล",
-          };
-        }
+        const scoredQs = gradedQs.filter((q) => (q.correct_answer || "").trim());
+        const pendingCount = gradedQs.length - scoredQs.length;
 
         const { gradeProjectExamsRpc } = await import("@/lib/supabase/projects");
-        let rpcResult = { graded_total: 0, passed_total: 0 };
+        let rpcResult = { graded_total: 0, passed_total: 0, pending_keys: pendingCount };
+        let pendingFromServer: number | null = null;
         try {
           rpcResult = await gradeProjectExamsRpc(token, projectId);
+          pendingFromServer = rpcResult.pending_keys;
         } catch (rpcErr) {
           const msg = rpcErr instanceof Error ? rpcErr.message : String(rpcErr);
-          if (/missing_answer_keys/i.test(msg)) {
-            return {
-              ok: false as const,
-              error: "กรุณากำหนดเฉลยคำตอบให้ครบทุกข้อก่อนประมวลผล",
-            };
-          }
-          throw rpcErr;
+          if (!/missing_answer_keys/i.test(msg)) throw rpcErr;
         }
 
         const project = projects.find((p) => p.id === projectId);
-        const maxScore =
-          gradedQs.reduce((acc, q) => acc + (typeof q.points === "number" ? q.points : 1), 0) ||
-          project?.max_score ||
-          5;
+        const maxScore = scoredQs.reduce((acc, q) => acc + (typeof q.points === "number" ? q.points : 1), 0);
         const { isExamPassed } = await import("@/lib/siteSettings");
+        const { answersMatch } = await import("@/lib/answerKeys");
 
         let gradedCount = 0;
         let passedCount = 0;
@@ -500,22 +522,13 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
             if (exam.project_id && exam.project_id !== projectId && projectId !== "ict-talent-2026") return exam;
 
             let score = 0;
-            for (const q of gradedQs) {
+            for (const q of scoredQs) {
               const candidateAns = (exam.answers[q.id] || "").trim();
               const correctAns = (q.correct_answer || "").trim();
 
               if (!candidateAns || !correctAns) continue;
 
-              let isMatch = candidateAns === correctAns;
-
-              if (!isMatch && q.options && q.options.length > 0) {
-                const corrIndex = q.options.indexOf(correctAns) + 1;
-                const candIndex = q.options.indexOf(candidateAns) + 1;
-
-                if (String(candIndex) === correctAns || String(corrIndex) === candidateAns) {
-                  isMatch = true;
-                }
-              }
+              const isMatch = answersMatch(q, candidateAns, correctAns);
 
               if (isMatch) {
                 score += typeof q.points === "number" ? q.points : 1;
@@ -538,15 +551,10 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           ok: true as const,
           gradedCount: rpcResult.graded_total || gradedCount,
           passedCount: rpcResult.passed_total || passedCount,
+          pendingCount: pendingFromServer ?? pendingCount,
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : "ตรวจข้อสอบไม่สำเร็จ";
-        if (/missing_answer_keys/i.test(msg)) {
-          return {
-            ok: false as const,
-            error: "กรุณากำหนดเฉลยคำตอบให้ครบทุกข้อก่อนประมวลผล",
-          };
-        }
         return { ok: false as const, error: msg };
       }
     },
@@ -590,6 +598,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           birth_date: input.birth_date,
           gender: input.gender,
           position: input.position,
+          position_other: input.position_other,
           duty: input.duty,
           line_id: input.line_id,
           email: input.email,
@@ -639,21 +648,14 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           };
         }
         if (result.kind === "business") {
+          forgetExamProgress();
           persistSession({ kind: "business", user: result.user });
           return { ok: true as const, kind: "business" as const };
         }
         if (result.kind === "audit") {
+          forgetExamProgress();
           persistSession({ kind: "audit", user: result.user });
           return { ok: true as const, kind: "audit" as const };
-        }
-        if (result.candidate.must_set_password) {
-          return {
-            ok: false as const,
-            error: "กรุณาตั้งรหัสผ่านครั้งแรกก่อนเข้าใช้งาน",
-            needPasswordSetup: true,
-            loginEmailForSetup: result.candidate.login_email || email.trim().toLowerCase(),
-            profileIdForSetup: result.candidate.id,
-          };
         }
         if (result.candidate.is_active === false) {
           return {
@@ -663,6 +665,8 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         }
         persistSession({ kind: "candidate", candidate: result.candidate });
         setCandidates([result.candidate]);
+        setExamProgress([]);
+        await loadCandidateExamProgress(result.candidate);
         return { ok: true as const, kind: "candidate" as const };
       } catch (err) {
         return {
@@ -671,7 +675,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         };
       }
     },
-    [persistSession]
+    [forgetExamProgress, loadCandidateExamProgress, persistSession]
   );
 
   const completePasswordSetup = useCallback(
@@ -680,15 +684,18 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       if (!result.ok) return result;
       persistSession({ kind: "candidate", candidate: result.candidate });
       setCandidates([result.candidate]);
+      setExamProgress([]);
+      await loadCandidateExamProgress(result.candidate);
       return { ok: true as const };
     },
-    [persistSession]
+    [loadCandidateExamProgress, persistSession]
   );
 
   const loginAdmin = useCallback(
     async (username: string, password: string) => {
       const result = await adminLoginRpc(username, password);
       if (!result.ok) return { ok: false as const, error: result.error };
+      forgetExamProgress();
       persistSession({ kind: "admin", admin: result.admin, token: result.token });
       try {
         const adminQs = await adminFetchProjectQuestions(result.token);
@@ -698,7 +705,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       }
       return { ok: true as const, mustChangePassword: result.admin.must_change_password };
     },
-    [persistSession]
+    [forgetExamProgress, persistSession]
   );
 
   const syncExecutiveUser = useCallback(
@@ -731,13 +738,22 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       if (session?.kind === "candidate") {
         void logPortalLogout(session.candidate.id, session.candidate.phone);
       }
+      forgetExamProgress();
       persistSession(null);
       if (shouldRedirect && typeof window !== "undefined") {
         window.location.href = "/";
       }
     },
-    [persistSession, session]
+    [forgetExamProgress, persistSession, session]
   );
+
+  const reloadExamProgress = useCallback(async () => {
+    if (session?.kind !== "candidate") {
+      forgetExamProgress();
+      return;
+    }
+    await loadCandidateExamProgress(session.candidate);
+  }, [forgetExamProgress, loadCandidateExamProgress, session]);
 
   const saveWatchProgress = useCallback(
     async (partial: Omit<WatchProgress, "candidate_id" | "last_updated">) => {
@@ -939,6 +955,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           | "eng_first_name"
           | "eng_last_name"
           | "position"
+          | "position_other"
           | "duty"
           | "line_id"
           | "email"
@@ -1043,6 +1060,9 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       candidates,
       watchProgress,
       examProgress,
+      examProgressReady,
+      examProgressError,
+      reloadExamProgress,
       projects,
       videos,
       questions,
@@ -1055,6 +1075,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       saveProjectQuestion,
       deleteProjectQuestion,
       bulkSaveAnswerKeys,
+      applyLocalAnswerKeys,
       gradeProjectExams,
       session,
       currentCandidate,
@@ -1088,6 +1109,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       updateCandidateProfile,
       adminUser,
       bulkSaveAnswerKeys,
+      applyLocalAnswerKeys,
       candidates,
       currentCandidate,
       deleteProject,
@@ -1095,6 +1117,8 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       deleteProjectVideo,
       districtStats,
       examProgress,
+      examProgressError,
+      examProgressReady,
       getExamFor,
       getWatchFor,
       gradeProjectExams,
@@ -1113,6 +1137,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       refreshAdminSession,
       syncExecutiveUser,
       refreshData,
+      reloadExamProgress,
       registerCandidate,
       saveExamDraft,
       saveProject,

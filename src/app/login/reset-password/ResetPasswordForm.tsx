@@ -36,7 +36,6 @@ export default function ResetPasswordForm() {
     isFirstTime && prefillEmail ? "password" : "verify"
   );
   const [email, setEmail] = useState(prefillEmail);
-  const [nationalId, setNationalId] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -55,7 +54,7 @@ export default function ResetPasswordForm() {
     try {
       const verified = isFirstTime
         ? await verifyCandidateForPassword(email.trim(), phone.trim())
-        : await verifyCandidateForgotPassword(nationalId.trim(), phone.trim());
+        : await verifyCandidateForgotPassword(email.trim(), phone.trim());
       if (!verified.ok) {
         setError(VERIFY_FAIL_MSG);
         return;
@@ -93,14 +92,16 @@ export default function ResetPasswordForm() {
 
     setSubmitting(true);
     try {
-      const result = await setCandidatePassword(
-        useEmail,
-        usePhone,
-        password,
-        isFirstTime ? null : nationalId.trim()
-      );
+      const result = await setCandidatePassword(useEmail, usePhone, password);
       if (!result.ok) {
-        setError(result.error || "ตั้งรหัสผ่านไม่สำเร็จ");
+        const alreadyHasPassword =
+          isFirstTime &&
+          (result.error.includes("ข้อมูลไม่ถูกต้อง") || result.error.includes("ติดต่อผู้ดูแล"));
+        setError(
+          alreadyHasPassword
+            ? "บัญชีนี้มีรหัสผ่านอยู่แล้ว ไม่ต้องตั้งรหัสผ่านใหม่ กรุณากลับไปเข้าสู่ระบบด้วยรหัสผ่านเดิม"
+            : result.error || "ตั้งรหัสผ่านไม่สำเร็จ"
+        );
         setSubmitting(false);
         return;
       }
@@ -124,9 +125,7 @@ export default function ResetPasswordForm() {
         </h1>
         <p className="text-gray-500 mb-6 text-sm">
           {step === "verify"
-            ? isFirstTime
-              ? "ยืนยันตัวตนด้วยอีเมล (Login ID) และเบอร์โทรที่ลงทะเบียน เพียงครั้งเดียว"
-              : "ยืนยันตัวตนด้วยเลขบัตรประชาชน และเบอร์โทรปัจจุบัน"
+            ? "ยืนยันตัวตนด้วยอีเมล (Login ID) และเบอร์โทรปัจจุบัน"
             : isFirstTime
               ? "กรุณาตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)"
               : "ยืนยันตัวตนสำเร็จแล้ว - กรุณาตั้งรหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)"}
@@ -136,41 +135,22 @@ export default function ResetPasswordForm() {
 
         {step === "verify" ? (
           <form onSubmit={handleVerify} className="space-y-4">
-            {isFirstTime ? (
-              <div>
-                <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                  Login ID (อีเมล)
-                </label>
-                <input
-                  className={inputClass}
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-            ) : (
-              <div>
-                <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                  เลขบัตรประชาชน (National ID)
-                </label>
-                <input
-                  className={inputClass}
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={nationalId}
-                  onChange={(e) => setNationalId(e.target.value.replace(/\D/g, "").slice(0, 13))}
-                  required
-                  minLength={13}
-                  maxLength={13}
-                />
-              </div>
-            )}
             <div>
               <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
-                เบอร์โทรศัพท์
+                อีเมลเข้าสู่ระบบ
+              </label>
+              <input
+                className={inputClass}
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">
+                เบอร์โทรศัพท์ปัจจุบัน
               </label>
               <input
                 className={inputClass}
@@ -184,11 +164,7 @@ export default function ResetPasswordForm() {
             {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
             <button
               type="submit"
-              disabled={
-                submitting ||
-                !phone ||
-                (isFirstTime ? !email : nationalId.length !== 13)
-              }
+              disabled={submitting || !phone || !email}
               className="w-full rounded-full bg-[var(--primary-blue)] text-white py-3.5 font-bold disabled:opacity-40 hover:-translate-y-0.5 transition-all"
             >
               {submitting ? "กำลังตรวจสอบ..." : "ตรวจสอบข้อมูลก่อนตั้งค่ารหัสผ่านใหม่"}

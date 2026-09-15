@@ -582,12 +582,16 @@ function mapAdminUserRow(item: unknown): Candidate {
         ? String(p.email)
         : undefined,
     login_email: p.login_email ? String(p.login_email) : undefined,
+    province: p.province ? String(p.province) : undefined,
+    district_id: p.district_id ? String(p.district_id) : undefined,
+    district_name: p.district_name ? String(p.district_name) : undefined,
     remark: p.remark ? String(p.remark) : undefined,
     is_school_admin: Boolean(p.is_school_admin) || role === "school_admin",
     portal_role: role,
     is_active: p.is_active !== false,
     deleted_at: p.deleted_at ? String(p.deleted_at) : null,
     position: p.position ? String(p.position) : undefined,
+    position_other: p.position_other ? String(p.position_other) : undefined,
     title_th: p.title_th ? String(p.title_th) : undefined,
     title_other_th: p.title_other_th ? String(p.title_other_th) : undefined,
     created_at: p.created_at ? String(p.created_at) : new Date().toISOString(),
@@ -733,6 +737,7 @@ export async function adminExportExamResponsesRpc(token: string, projectId: stri
     const r = asObj(item);
     return {
       profile_id: String(r.profile_id ?? ""),
+      login_email: String(r.login_email ?? r.email ?? "") || "",
       first_name: String(r.first_name ?? ""),
       last_name: String(r.last_name ?? ""),
       full_name: String(r.full_name ?? "").trim() || "N/A",

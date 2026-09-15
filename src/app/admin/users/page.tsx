@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
@@ -22,7 +22,9 @@ import {
   generateTempPassword,
   type ExecutiveUserRow,
 } from "@/lib/supabase/admin";
+import { Combobox } from "@/app/components/Combobox";
 import { TablePagination, paginateSlice } from "@/app/components/TablePagination";
+import { useCandidateFilters, useExecutiveFilters } from "@/hooks/useAdminUserFilters";
 import { fetchDistrictStats } from "@/lib/supabase/data";
 import { inputClass } from "@/lib/styles";
 import type { Candidate, PortalRole } from "@/types/ict";
@@ -37,7 +39,7 @@ const PAGE_SIZE = 10;
 function UsersContent() {
   const { adminToken, districtStats } = useIctStore();
   const [districtCatalog, setDistrictCatalog] = useState(districtStats);
-  const [query, setQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<"candidates" | "executives">("candidates");
   const [users, setUsers] = useState<Candidate[]>([]);
   const [executives, setExecutives] = useState<{
     business: ExecutiveUserRow[];
@@ -79,13 +81,13 @@ function UsersContent() {
       .catch(() => setDistrictCatalog([]));
   }, [districtStats]);
 
-  const search = async (q = query) => {
+  const search = async () => {
     if (!adminToken) return;
     setLoading(true);
     setError("");
     try {
       const [rows, exec] = await Promise.all([
-        adminSearchUsers(adminToken, q, 200, includeDeleted),
+        adminSearchUsers(adminToken, "", 500, includeDeleted),
         adminListExecutiveUsers(adminToken, includeDeleted),
       ]);
       setUsers(rows);
@@ -99,12 +101,12 @@ function UsersContent() {
     }
   };
 
+  // Initial load only — client filters apply to this cached set; Search reloads from server.
   useEffect(() => {
     if (!adminToken) return;
-    const t = window.setTimeout(() => void search(query), 280);
-    return () => window.clearTimeout(t);
+    void search();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminToken, query, includeDeleted]);
+  }, [adminToken]);
 
   const withBusy = async (id: string, fn: () => Promise<void>) => {
     setBusyId(id);
@@ -256,9 +258,46 @@ function UsersContent() {
     return d ? d.district_name : id;
   };
 
-  const allExecutives = [...executives.business, ...executives.audit];
-  const pagedUsers = paginateSlice(users, userPage, PAGE_SIZE);
-  const pagedExecutives = paginateSlice(allExecutives, execPage, PAGE_SIZE);
+  const allExecutives = useMemo(
+    () => [...executives.business, ...executives.audit],
+    [executives.audit, executives.business]
+  );
+  const {
+    filters: execFilters,
+    setFilters: setExecFilters,
+    filtered: filteredExecutives,
+    reset: resetExecFilters,
+  } = useExecutiveFilters(allExecutives);
+  const {
+    filters: candFilters,
+    setFilters: setCandFilters,
+    filtered: filteredUsers,
+    schoolOptions,
+    districtOptions,
+    provinceOptions,
+    reset: resetCandFilters,
+  } = useCandidateFilters(users);
+  const pagedUsers = paginateSlice(filteredUsers, userPage, PAGE_SIZE);
+  const pagedExecutives = paginateSlice(filteredExecutives, execPage, PAGE_SIZE);
+
+  const clearCandidateFilters = () => {
+    resetCandFilters();
+    setUserPage(1);
+  };
+
+  const clearExecutiveFilters = () => {
+    resetExecFilters();
+    setExecPage(1);
+  };
+
+  const switchTab = (tab: "candidates" | "executives") => {
+    if (tab === activeTab) return;
+    setActiveTab(tab);
+    resetCandFilters();
+    resetExecFilters();
+    setUserPage(1);
+    setExecPage(1);
+  };
 
   const execSuspend = (ex: ExecutiveUserRow) =>
     withBusy(ex.id, async () => {
@@ -318,7 +357,7 @@ function UsersContent() {
             จัดการ - ผู้ใช้งาน
           </h1>
           <p className="text-gray-500 dark:text-white/80 text-sm">
-            ค้นหาด้วยเลขบัตรประชาชน ชื่อ-นามสกุล รหัส/ชื่อโรงเรียน หรืออีเมล
+            ค้นหาผู้ใช้งานเพื่อจัดการบัญชี
           </p>
         </div>
         <button
@@ -326,14 +365,14 @@ function UsersContent() {
           onClick={() => setShowCreate((v) => !v)}
           className="rounded-xl bg-[var(--primary-blue)] text-white px-4 py-2.5 text-sm font-bold"
         >
-          {showCreate ? "ปิดฟอร์ม" : "+ สร้าง business/audit"}
+          {showCreate ? "ปิดฟอร์ม" : "+ สร้าง User พิเศษ"}
         </button>
       </div>
 
       {showCreate && (
         <div className="mb-6 rounded-2xl border border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-950 p-5 space-y-3">
           <p className="text-sm font-semibold dark:text-white">
-            สร้างบัญชี executive (ตารางแยก — ไม่ใช่ profiles)
+            สร้างผู้ใช้งานพิเศษ
           </p>
           <select
             className={inputClass}
@@ -346,7 +385,7 @@ function UsersContent() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <input
               className={inputClass}
-              placeholder="Login ID (a-z 0-9 . _ -) *"
+              placeholder="ชื่อเข้าสู่ระบบ (a-z 0-9 . _ -) *"
               type="text"
               autoComplete="off"
               value={createForm.login_email}
@@ -425,25 +464,102 @@ function UsersContent() {
         </div>
       )}
 
-      {(allExecutives.length > 0 || includeDeleted) && (
+      {error && <p className="text-sm text-[var(--accent-red)] mb-3">{error}</p>}
+      {message && <p className="text-sm text-[var(--accent-green)] mb-3">{message}</p>}
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => switchTab("candidates")}
+          className={`rounded-full px-4 py-2 text-sm font-bold ${
+            activeTab === "candidates"
+              ? "bg-[var(--primary-blue)] text-white"
+              : "bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-white"
+          }`}
+        >
+          ผู้ใช้งานทั่วไป
+        </button>
+        <button
+          type="button"
+          onClick={() => switchTab("executives")}
+          className={`rounded-full px-4 py-2 text-sm font-bold ${
+            activeTab === "executives"
+              ? "bg-[var(--primary-blue)] text-white"
+              : "bg-gray-100 text-gray-700 dark:bg-slate-800 dark:text-white"
+          }`}
+        >
+          ผู้ใช้งานพิเศษ
+        </button>
+      </div>
+
+      {activeTab === "executives" && (
         <div className="mb-8">
-          <h2 className="text-lg font-extrabold dark:text-white mb-3">บัญชี Executive</h2>
+          <h2 className="text-lg font-extrabold dark:text-white mb-3">ผู้ใช้งานพิเศษ</h2>
+          <div className="mb-3 space-y-3 rounded-2xl border border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-950 p-4">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <input
+                className={inputClass}
+                placeholder="ค้นหา Login ID..."
+                value={execFilters.loginId}
+                onChange={(e) => {
+                  setExecFilters((prev) => ({ ...prev, loginId: e.target.value }));
+                  setExecPage(1);
+                }}
+              />
+              <input
+                className={inputClass}
+                placeholder="ค้นหาชื่อแสดง..."
+                value={execFilters.displayName}
+                onChange={(e) => {
+                  setExecFilters((prev) => ({ ...prev, displayName: e.target.value }));
+                  setExecPage(1);
+                }}
+              />
+              <select
+                className={inputClass}
+                value={execFilters.accountType}
+                onChange={(e) => {
+                  setExecFilters((prev) => ({
+                    ...prev,
+                    accountType: e.target.value as "all" | "business" | "audit",
+                  }));
+                  setExecPage(1);
+                }}
+              >
+                <option value="all">ประเภทบัญชี: ทั้งหมด</option>
+                <option value="business">Business User</option>
+                <option value="audit">Audit User</option>
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={clearExecutiveFilters}
+                className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-800"
+              >
+                ล้างตัวกรองทั้งหมด
+              </button>
+              <p className="self-center text-xs text-gray-500 dark:text-white/60">
+                
+              </p>
+            </div>
+          </div>
           <div className="overflow-x-auto rounded-2xl border border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-950">
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 dark:bg-black text-left dark:text-white">
                 <tr>
-                  <th className="px-3 py-3 font-semibold">Kind</th>
+                  <th className="px-3 py-3 font-semibold">ประเภท</th>
                   <th className="px-3 py-3 font-semibold">Login ID</th>
                   <th className="px-3 py-3 font-semibold">ชื่อแสดง</th>
                   <th className="px-3 py-3 font-semibold">ตำแหน่ง / เขต</th>
-                  <th className="px-3 py-3 font-semibold">Actions</th>
+                  <th className="px-3 py-3 font-semibold">จัดการ</th>
                 </tr>
               </thead>
               <tbody>
                 {pagedExecutives.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-3 py-8 text-center text-gray-400">
-                      ยังไม่มีบัญชี executive
+                      ยังไม่มีผู้ใช้งานพิเศษ
                     </td>
                   </tr>
                 )}
@@ -528,7 +644,7 @@ function UsersContent() {
                                   setAuditPick("");
                                 }}
                               >
-                                Add
+                                เพิ่ม
                               </button>
                               <button
                                 type="button"
@@ -605,51 +721,135 @@ function UsersContent() {
           <TablePagination
             page={execPage}
             pageSize={PAGE_SIZE}
-            total={allExecutives.length}
+            total={filteredExecutives.length}
             onPageChange={setExecPage}
           />
         </div>
       )}
 
-      <div className="bg-white dark:bg-slate-950 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm p-4 mb-4 flex flex-col sm:flex-row gap-3">
-        <input
-          className={inputClass}
-          placeholder="ค้นหา: เลขบัตร / ชื่อ / รหัสโรงเรียน / ชื่อโรงเรียน / อีเมล"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <label className="flex items-center gap-2 text-sm whitespace-nowrap dark:text-white">
+      {activeTab === "candidates" && (
+      <>
+      <div className="bg-white dark:bg-slate-950 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm p-4 mb-4 space-y-3">
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
           <input
-            type="checkbox"
-            checked={includeDeleted}
-            onChange={(e) => setIncludeDeleted(e.target.checked)}
+            className={inputClass}
+            placeholder="ค้นหาอีเมลเข้าสู่ระบบ..."
+            value={candFilters.loginEmail}
+            onChange={(e) => {
+              setCandFilters((prev) => ({ ...prev, loginEmail: e.target.value }));
+              setUserPage(1);
+            }}
           />
-          รวมที่ถูกลบ (กู้คืนได้)
-        </label>
-        <button
-          type="button"
-          onClick={() => void search()}
-          disabled={loading}
-          className="rounded-xl bg-[var(--primary-blue)] text-white px-5 py-2.5 font-bold disabled:opacity-40"
-        >
-          {loading ? "..." : "ค้นหา"}
-        </button>
+          <input
+            className={inputClass}
+            placeholder="ค้นหาชื่อผู้สมัคร..."
+            value={candFilters.name}
+            onChange={(e) => {
+              setCandFilters((prev) => ({ ...prev, name: e.target.value }));
+              setUserPage(1);
+            }}
+          />
+          <input
+            className={inputClass}
+            placeholder="ค้นหารหัสโรงเรียน..."
+            value={candFilters.schoolId}
+            onChange={(e) => {
+              setCandFilters((prev) => ({ ...prev, schoolId: e.target.value }));
+              setUserPage(1);
+            }}
+          />
+          <Combobox
+            value={candFilters.schoolName}
+            options={schoolOptions.map((school) => ({
+              value: school.id,
+              label: school.name,
+            }))}
+            placeholder="เลือกโรงเรียน"
+            allLabel="โรงเรียนทั้งหมด"
+            onChange={(value) => {
+              setCandFilters((prev) => ({ ...prev, schoolName: value }));
+              setUserPage(1);
+            }}
+          />
+          <Combobox
+            value={candFilters.districtId}
+            options={districtOptions.map((district) => ({
+              value: district.id,
+              label: district.name,
+            }))}
+            placeholder="เลือกเขตพื้นที่การศึกษา"
+            allLabel="เขตพื้นที่ทั้งหมด"
+            onChange={(value) => {
+              setCandFilters((prev) => ({ ...prev, districtId: value }));
+              setUserPage(1);
+            }}
+          />
+          <Combobox
+            value={candFilters.province}
+            options={provinceOptions}
+            placeholder="เลือกจังหวัด"
+            allLabel="จังหวัดทั้งหมด"
+            onChange={(value) => {
+              setCandFilters((prev) => ({ ...prev, province: value }));
+              setUserPage(1);
+            }}
+          />
+          <select
+            className={inputClass}
+            value={candFilters.portalRole}
+            onChange={(e) => {
+              setCandFilters((prev) => ({
+                ...prev,
+                portalRole: e.target.value as "all" | PortalRole,
+              }));
+              setUserPage(1);
+            }}
+          >
+            <option value="all">เลือกบทบาท: ทั้งหมด</option>
+            <option value="user">ผู้สมัคร</option>
+            <option value="school_admin">ผู้ดูแลโรงเรียน</option>
+          </select>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <label className="flex items-center gap-2 text-sm whitespace-nowrap dark:text-white">
+            <input
+              type="checkbox"
+              checked={includeDeleted}
+              onChange={(e) => setIncludeDeleted(e.target.checked)}
+            />
+            รวมที่ถูกลบ (ยังสามารถกู้คืนได้)
+          </label>
+          <button
+            type="button"
+            onClick={() => void search()}
+            disabled={loading}
+            className="rounded-xl bg-[var(--primary-blue)] text-white px-5 py-2.5 font-bold disabled:opacity-40"
+          >
+            {loading ? "กำลังค้นหา..." : "ค้นหา"}
+          </button>
+          <button
+            type="button"
+            onClick={clearCandidateFilters}
+            className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-bold text-slate-800"
+          >
+            ล้างตัวกรองทั้งหมด
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 dark:text-white/60">          
+        </p>
       </div>
-
-      {error && <p className="text-sm text-[var(--accent-red)] mb-3">{error}</p>}
-      {message && <p className="text-sm text-[var(--accent-green)] mb-3">{message}</p>}
 
       <h2 className="text-lg font-extrabold dark:text-white mb-3">ผู้ใช้งานทั่วไป</h2>
       <div className="overflow-x-auto rounded-2xl border border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-950">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 dark:bg-black text-left dark:text-white">
             <tr>
-              <th className="px-3 py-3 font-semibold">National ID</th>
+              <th className="px-3 py-3 font-semibold">หมายเลขสมาชิก</th>
               <th className="px-3 py-3 font-semibold">ชื่อ-นามสกุล</th>
               <th className="px-3 py-3 font-semibold">โทร</th>
-              <th className="px-3 py-3 font-semibold">Login ID</th>
-              <th className="px-3 py-3 font-semibold">Role</th>
-              <th className="px-3 py-3 font-semibold">Actions</th>
+              <th className="px-3 py-3 font-semibold">อีเมลเข้าสู่ระบบ</th>
+              <th className="px-3 py-3 font-semibold">บทบาท</th>
+              <th className="px-3 py-3 font-semibold">จัดการ</th>
             </tr>
           </thead>
           <tbody>
@@ -689,7 +889,7 @@ function UsersContent() {
                           type="email"
                           value={emailDraft}
                           onChange={(e) => setEmailDraft(e.target.value)}
-                          placeholder="Login ID (อีเมล)"
+                          placeholder="อีเมลเข้าสู่ระบบ"
                         />
                         <div className="flex gap-1">
                           <button
@@ -816,9 +1016,11 @@ function UsersContent() {
       <TablePagination
         page={userPage}
         pageSize={PAGE_SIZE}
-        total={users.length}
+        total={filteredUsers.length}
         onPageChange={setUserPage}
       />
+      </>
+      )}
     </div>
   );
 }

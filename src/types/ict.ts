@@ -53,7 +53,7 @@ export type SchoolTotals = {
 };
 
 export type Candidate = {
-  id: string; // profile_id (เลขบัตรประชาชน)
+  id: string; // immutable 13-digit profile_id (generated on registration)
   school_id: string;
   school_name?: string;
   /** Thai given name (legacy primary display) */
@@ -73,6 +73,8 @@ export type Candidate = {
   birth_date?: string;
   gender?: string;
   position?: string;
+  /** Free-text title when position is "อื่นๆ" */
+  position_other?: string;
   duty?: string;
   line_id?: string;
   /** @deprecated Prefer contact_email — kept for legacy UI bindings */
@@ -81,6 +83,10 @@ export type Candidate = {
   contact_email?: string;
   /** Login ID email (admin-only change; used for authentication) */
   login_email?: string;
+  /** School geography (from admin search join) */
+  province?: string;
+  district_id?: string;
+  district_name?: string;
   /** Designated school data manager (one per school) */
   is_school_admin?: boolean;
   /** Portal access role for candidates only */
@@ -150,6 +156,8 @@ export type QuestionType = "mcq" | "open_ended" | "short";
 export type ExamQuestion = {
   id: string;
   project_id?: string;
+  /** Permanent code. Assigned once; never follows display order. */
+  question_code?: string | null;
   prompt: string;
   type: QuestionType;
   options?: string[];
@@ -161,6 +169,18 @@ export type ExamQuestion = {
   order_index?: number;
   /** When true, candidate must answer before exam submit */
   answer_required?: boolean;
+  section_id?: string | null;
+  section_title?: string | null;
+  section_description?: string | null;
+  section_order?: number | null;
+};
+
+export type ExamSection = {
+  id: string;
+  project_id: string;
+  title: string;
+  description?: string | null;
+  section_order: number;
 };
 
 /** Sanitized version for candidates during exams to prevent anti-cheating inspection */
