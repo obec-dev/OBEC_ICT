@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { ExamAccessGate } from "@/app/components/ExamAccessGate";
 import { ModalOverlay } from "@/app/components/ModalOverlay";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { UnsavedLeaveGuard } from "@/app/components/UnsavedLeaveGuard";
 import { useIctStore } from "@/contexts/IctStore";
+import type { ExamPart } from "@/lib/examSections";
 import { groupQuestionsBySection } from "@/lib/examSections";
+import { isLessonSubmitted, resolveExamPartFromParams } from "@/lib/lessonExamMap";
 import { getProjectExamStatus, getProjectLearningOpen, getSiteProject } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
 import type { ExamProgress, LearningProject, ProjectQuestion } from "@/types/ict";
@@ -23,24 +26,30 @@ function answersEqual(a: Record<string, string>, b: Record<string, string>) {
 
 type ExamWorkspaceProps = {
   currentProject: LearningProject | undefined;
-  projectQuestions: ProjectQuestion[];
+  allSectionIds: string[];
+  activePart: ExamPart;
+  lessonIndex: number;
+  lessonTitle: string;
   exam: ExamProgress | undefined;
-  locked: boolean;
+  lessonLocked: boolean;
   initialAnswers: Record<string, string>;
 };
 
 function ExamWorkspace({
   currentProject,
-  projectQuestions,
+  allSectionIds,
+  activePart,
+  lessonIndex,
+  lessonTitle,
   exam,
-  locked,
+  lessonLocked,
   initialAnswers,
 }: ExamWorkspaceProps) {
-  const { saveExamDraft, submitExam } = useIctStore();
+  const { saveExamDraft, submitExamLesson } = useIctStore();
+  const locked = lessonLocked;
 
   const [answers, setAnswers] = useState<Record<string, string>>(initialAnswers);
   const [lastSavedAnswers, setLastSavedAnswers] = useState<Record<string, string>>(initialAnswers);
-  /** hidden until first save in this session; then saved | dirty */
   const [syncStatus, setSyncStatus] = useState<"hidden" | "saved" | "dirty">("hidden");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -48,9 +57,8 @@ function ExamWorkspace({
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const parts = useMemo(() => groupQuestionsBySection(projectQuestions), [projectQuestions]);
-  const [activePartId, setActivePartId] = useState(parts[0]?.id ?? "");
-  const [openParts, setOpenParts] = useState<Record<string, boolean>>({});
+  const sectionQuestions = activePart.questions;
+  const sectionAnswered = sectionQuestions.filter((q) => (answers[q.id] || "").trim()).length;
 
   const isDirty = useMemo(
     () => !locked && !answersEqual(answers, lastSavedAnswers),
@@ -62,7 +70,7 @@ function ExamWorkspace({
     setAnswers((prev) => ({ ...prev, [id]: value }));
     setSaveMessage("");
     setSaveError("");
-    setSyncStatus((prev) => (prev === "hidden" ? "dirty" : "dirty"));
+    setSyncStatus("dirty");
   };
 
   const ensureExamOpen = (): boolean => {
@@ -94,7 +102,7 @@ function ExamWorkspace({
       }
       setLastSavedAnswers(answers);
       setSyncStatus("saved");
-      setSaveMessage("บันทึกคำตอบล่าสุดแล้ว");
+      setSaveMessage("บันทึกร่างคำตอบบทเรียนนี้แล้ว");
       return true;
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "บันทึกคำตอบไม่สำเร็จ");
@@ -104,29 +112,38 @@ function ExamWorkspace({
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmitLesson = async () => {
     if (submitting) return;
     setSubmitting(true);
     setSaveError("");
     try {
       if (!ensureExamOpen()) return;
-      const missing = projectQuestions.filter((q) => {
+      const missing = sectionQuestions.filter((q) => {
         if (q.answer_required === false) return false;
         return !(answers[q.id] || "").trim();
       });
       if (missing.length > 0) {
-        setSaveError(`กรุณาตอบคำถามที่บังคับให้ครบก่อนส่ง (${missing.length} ข้อยังไม่ได้ตอบ)`);
+        setSaveError(`กรุณาตอบคำถามที่บังคับในบทนี้ให้ครบก่อนส่ง (${missing.length} ข้อยังไม่ได้ตอบ)`);
         setConfirmOpen(false);
         return;
       }
-      const result = await submitExam(answers, currentProject?.id);
+      const result = await submitExamLesson(
+        answers,
+        activePart.id,
+        allSectionIds,
+        currentProject?.id
+      );
       if (!result.ok) {
         setSaveError(result.error);
         return;
       }
       setLastSavedAnswers(answers);
       setConfirmOpen(false);
-      setSaveMessage("ส่งคำตอบเรียบร้อยแล้ว");
+      setSaveMessage(
+        result.allDone
+          ? "ส่งแบบทดสอบบทนี้แล้ว และส่งครบทุกบทเรียนแล้ว"
+          : "ส่งแบบทดสอบบทเรียนนี้เรียบร้อยแล้ว — สามารถไปทำบทถัดไปได้จากหน้าบทเรียน"
+      );
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "ส่งข้อสอบไม่สำเร็จ");
     } finally {
@@ -153,21 +170,28 @@ function ExamWorkspace({
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <span className="text-xs font-bold text-[var(--primary-blue)] uppercase tracking-wider bg-blue-50 px-3 py-1 rounded-full border border-blue-100 mb-2 inline-block">
-              แบบทดสอบประเมินผล
+              แบบทดสอบบทเรียนที่ {lessonIndex}
             </span>
-            <h1 className="text-3xl font-extrabold text-[var(--primary-blue)]">
-              {currentProject?.name ? `ข้อสอบ: ${currentProject.name}` : "ข้อสอบคัดเลือกตัวแทน ICT Talent"}
-            </h1>
+            <h1 className="text-3xl font-extrabold text-[var(--primary-blue)]">{activePart.title}</h1>
             <p className="text-gray-500 text-sm mt-1">
+              {lessonTitle ? `จากวิดีโอ: ${lessonTitle}` : null}
+              {activePart.description ? (
+                <span className="block mt-1">{activePart.description}</span>
+              ) : null}
+            </p>
+            <p className="text-gray-500 text-sm mt-2">
               {locked
-                ? "ส่งคำตอบแล้ว ไม่สามารถแก้ไขได้"
-                : "ท่านสามารถบันทึกคำตอบแล้วกลับมาทำต่อภายหลังได้จนกว่าจะหมดช่วงเวลาสอบ"}
+                ? "ส่งแบบทดสอบบทนี้แล้ว ไม่สามารถแก้ไขได้"
+                : ""}
+            </p>
+            <p className="text-xs font-semibold text-gray-500 mt-2">
+              ตอบแล้ว {sectionAnswered} จาก {sectionQuestions.length} ข้อในบทนี้
             </p>
           </div>
 
           <div className="flex flex-col items-start md:items-end gap-1 shrink-0">
             <Link href="/portal/learn" className="text-xs font-bold text-[var(--primary-blue)] hover:underline mb-1">
-              ← กลับไปหน้าบทเรียน
+              ← กลับไปหน้าบทเรียนและแบบทดสอบ
             </Link>
             {!locked && syncStatus === "saved" && (
               <span className="text-sm text-[var(--accent-green)] font-semibold">บันทึกคำตอบล่าสุดแล้ว</span>
@@ -199,71 +223,22 @@ function ExamWorkspace({
         )}
       </div>
 
-      {projectQuestions.length === 0 ? (
+      {sectionQuestions.length === 0 ? (
         <div className="bg-white rounded-2xl p-10 text-center text-gray-500 border border-gray-100 shadow-sm">
-          ยังไม่มีคำถามในชุดข้อสอบนี้
+          ยังไม่มีคำถามในแบบทดสอบบทเรียนนี้
+          <div className="mt-4">
+            <Link href="/portal/learn" className="text-sm font-bold text-[var(--primary-blue)] underline">
+              กลับไปเลือกบทเรียนอื่น
+            </Link>
+          </div>
         </div>
       ) : (
-        <div className="space-y-8">
-          {parts.length > 1 && (
-            <nav className="sticky top-3 z-10 flex gap-2 overflow-x-auto rounded-2xl border border-blue-100 bg-white/95 p-2 shadow-sm backdrop-blur">
-              {parts.map((part, partIndex) => {
-                const answered = part.questions.filter((q) => (answers[q.id] || "").trim()).length;
-                return (
-                  <button
-                    key={part.id}
-                    type="button"
-                    onClick={() => {
-                      setActivePartId(part.id);
-                      document.getElementById(`exam-part-${part.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }}
-                    className={`shrink-0 rounded-full px-4 py-2 text-left text-xs font-bold ${
-                      activePartId === part.id
-                        ? "bg-[var(--primary-blue)] text-white"
-                        : "bg-blue-50 text-[var(--primary-blue)]"
-                    }`}
-                  >
-                    ส่วนที่ {partIndex + 1}
-                    <span className="ml-2 font-semibold opacity-80">
-                      {answered}/{part.questions.length}
-                    </span>
-                  </button>
-                );
-              })}
-            </nav>
-          )}
-          {parts.map((part, partIndex) => {
-            const answered = part.questions.filter((q) => (answers[q.id] || "").trim()).length;
-            const open = openParts[part.id] !== false;
-            return (
-            <section key={part.id} id={`exam-part-${part.id}`} className="scroll-mt-24 overflow-hidden rounded-2xl border border-blue-100 bg-white">
-              <button
-                type="button"
-                className="flex w-full items-start justify-between gap-3 bg-blue-50/70 px-5 py-4 text-left"
-                onClick={() => {
-                  setActivePartId(part.id);
-                  setOpenParts((prev) => ({ ...prev, [part.id]: !open }));
-                }}
-              >
-                <span>
-                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--primary-blue)]">
-                    ส่วนที่ {partIndex + 1}
-                  </span>
-                  <span className="mt-1 block text-xl font-extrabold text-[var(--primary-blue)]">{part.title}</span>
-                  {part.description && <span className="mt-1 block text-sm text-gray-600">{part.description}</span>}
-                  <span className="mt-2 block text-xs font-semibold text-gray-500">
-                    ตอบแล้ว {answered} จาก {part.questions.length} ข้อ
-                  </span>
-                </span>
-                <span className="shrink-0 text-sm font-bold text-[var(--primary-blue)]">{open ? "ย่อ" : "ขยาย"}</span>
-              </button>
-              {open && (
-              <div className="space-y-4 p-4">
-          {part.questions.map((question) => (
+        <div className="space-y-4">
+          {sectionQuestions.map((question, index) => (
             <div key={question.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <div className="flex justify-between items-start mb-4 gap-2">
                 <h2 className="font-semibold text-base md:text-lg text-gray-800 dark:text-white">
-                  {question.globalNumber}. {question.prompt}
+                  {index + 1}. {question.prompt}
                   {question.answer_required !== false && (
                     <span className="text-[var(--accent-red)] ml-1" title="ต้องตอบก่อนส่ง">
                       *
@@ -282,7 +257,7 @@ function ExamWorkspace({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={question.image_url}
-                    alt={`ภาพประกอบข้อ ${question.globalNumber}`}
+                    alt={`ภาพประกอบข้อ ${index + 1}`}
                     className="max-h-64 w-auto rounded-xl border border-gray-200 object-contain bg-gray-50"
                   />
                 </div>
@@ -331,18 +306,13 @@ function ExamWorkspace({
               )}
             </div>
           ))}
-              </div>
-              )}
-            </section>
-            );
-          })}
         </div>
       )}
 
       {saveMessage && <p className="mt-4 text-sm text-[var(--accent-green)] font-semibold">{saveMessage}</p>}
       {saveError && <p className="mt-4 text-sm text-[var(--accent-red)] font-semibold">{saveError}</p>}
 
-      {!locked && projectQuestions.length > 0 && (
+      {!locked && sectionQuestions.length > 0 && (
         <div className="mt-8 flex flex-col sm:flex-row justify-end gap-3">
           <button
             type="button"
@@ -350,7 +320,7 @@ function ExamWorkspace({
             onClick={() => void commitDraft()}
             className="rounded-full border-2 border-[var(--primary-blue)] text-[var(--primary-blue)] px-8 py-3.5 font-bold disabled:opacity-40 hover:bg-blue-50 transition-all"
           >
-            {saving ? "กำลังบันทึก..." : "บันทึกคำตอบ"}
+            {saving ? "กำลังบันทึก..." : "บันทึกร่างบทนี้"}
           </button>
           <button
             type="button"
@@ -361,7 +331,7 @@ function ExamWorkspace({
             }}
             className="rounded-full bg-[var(--accent-red)] text-white px-8 py-3.5 font-bold hover:-translate-y-0.5 shadow-md transition-all disabled:opacity-40"
           >
-            ส่งคำตอบสุดท้าย
+            ส่งแบบทดสอบบทนี้
           </button>
         </div>
       )}
@@ -369,9 +339,11 @@ function ExamWorkspace({
       {confirmOpen && (
         <ModalOverlay onBackdropClick={() => !submitting && setConfirmOpen(false)}>
           <div className="bg-white rounded-3xl p-8 shadow-2xl border border-gray-100 mx-auto">
-            <h3 className="text-xl font-bold text-[var(--primary-blue)] mb-2">ยืนยันการส่งข้อสอบ?</h3>
+            <h3 className="text-xl font-bold text-[var(--primary-blue)] mb-2">
+              ยืนยันส่งแบบทดสอบบทเรียนที่ {lessonIndex}?
+            </h3>
             <p className="text-gray-600 text-sm mb-4">
-              หลังจากส่งข้อสอบแล้ว จะไม่สามารถแก้ไขคำตอบได้อีก
+              หลังส่งแล้วจะไม่สามารถแก้ไขคำตอบในบทนี้ได้อีก แต่ยังทำและส่งบทเรียนอื่นได้ตามปกติ
             </p>
             {saveError && <p className="text-sm text-[var(--accent-red)] font-semibold mb-4">{saveError}</p>}
             <div className="flex gap-3 justify-end">
@@ -387,9 +359,9 @@ function ExamWorkspace({
                 type="button"
                 disabled={submitting}
                 className="px-6 py-2.5 rounded-full bg-[var(--accent-red)] text-white font-bold text-sm hover:bg-red-700 shadow disabled:opacity-60"
-                onClick={() => void handleSubmit()}
+                onClick={() => void handleSubmitLesson()}
               >
-                {submitting ? "กำลังส่ง..." : "ยืนยันส่งข้อสอบ"}
+                {submitting ? "กำลังส่ง..." : "ยืนยันส่งบทนี้"}
               </button>
             </div>
           </div>
@@ -400,17 +372,18 @@ function ExamWorkspace({
 }
 
 function ExamContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     currentCandidate,
     getExamFor,
     projects,
+    videos,
     questions,
     examProgressReady,
     examProgressError,
     reloadExamProgress,
   } = useIctStore();
-  const [hydratedForCandidate, setHydratedForCandidate] = useState<string | null>(null);
-  const candidateId = currentCandidate?.id ?? null;
 
   const currentProject = useMemo(() => getSiteProject(projects), [projects]);
 
@@ -424,8 +397,31 @@ function ExamContent() {
     });
   }, [currentProject, questions]);
 
+  const projectVideos = useMemo(
+    () => videos.filter((v) => v.project_id === currentProject?.id),
+    [videos, currentProject?.id]
+  );
+
+  const videoIdParam = searchParams.get("videoId");
+  const sectionParam = searchParams.get("section");
+
+  const resolved = useMemo(
+    () =>
+      resolveExamPartFromParams(projectVideos, projectQuestions, {
+        videoId: videoIdParam,
+        section: sectionParam,
+      }),
+    [projectVideos, projectQuestions, videoIdParam, sectionParam]
+  );
+
+  useEffect(() => {
+    if (!videoIdParam && !sectionParam) {
+      router.replace("/portal/learn");
+    }
+  }, [router, sectionParam, videoIdParam]);
+
   const exam = currentCandidate ? getExamFor(currentCandidate.id, currentProject?.id) : undefined;
-  const locked = exam?.status === "submitted";
+  const examFullySubmitted = exam?.status === "submitted";
 
   const examStatus = useMemo(() => {
     if (!currentProject) {
@@ -440,19 +436,7 @@ function ExamContent() {
     return getProjectExamStatus(currentProject);
   }, [currentProject]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void reloadExamProgress().finally(() => {
-      if (!cancelled) setHydratedForCandidate(candidateId);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadExamProgress, candidateId]);
-
-  const answersReady = hydratedForCandidate === candidateId;
-
-  if (!examProgressReady || !answersReady) {
+  if (!examProgressReady) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 text-center text-gray-500">
         กำลังโหลดคำตอบล่าสุดจากระบบ...
@@ -492,19 +476,41 @@ function ExamContent() {
     );
   }
 
-  if (!examStatus.open && !locked) {
+  if (!examStatus.open && !examFullySubmitted) {
     return <PeriodClosedNotice title="ยังไม่เปิดช่วงสอบ" status={examStatus} homeHref="/portal/learn" />;
   }
 
-  const workspaceKey = `${currentCandidate?.id ?? "anon"}-${currentProject.id}-${exam?.status ?? "none"}-${exam?.updated_at ?? "empty"}`;
+  if (!resolved) {
+    return (
+      <div className="max-w-lg mx-auto px-4 py-16 text-center">
+        <h1 className="text-xl font-extrabold text-[var(--primary-blue)] mb-2">ไม่พบแบบทดสอบของบทเรียนนี้</h1>
+        <p className="text-sm text-gray-500 mb-6">
+          กรุณาเลือกบทเรียนจากหน้าบทเรียนและแบบทดสอบ แล้วกดปุ่มทำแบบทดสอบประจำบทเรียน
+        </p>
+        <Link
+          href="/portal/learn"
+          className="inline-flex rounded-full bg-[var(--primary-blue)] text-white px-6 py-3 font-bold"
+        >
+          กลับไปหน้าบทเรียนและแบบทดสอบ
+        </Link>
+      </div>
+    );
+  }
+
+  const allSectionIds = groupQuestionsBySection(projectQuestions).map((part) => part.id);
+  const lessonLocked = isLessonSubmitted(exam, resolved.part.id);
+  const workspaceKey = `${currentCandidate?.id ?? "anon"}-${currentProject.id}-${resolved.part.id}-${lessonLocked ? "locked" : "open"}`;
 
   return (
     <ExamWorkspace
       key={workspaceKey}
       currentProject={currentProject}
-      projectQuestions={projectQuestions}
+      allSectionIds={allSectionIds}
+      activePart={resolved.part}
+      lessonIndex={resolved.lessonIndex}
+      lessonTitle={resolved.video?.title ?? ""}
       exam={exam}
-      locked={locked}
+      lessonLocked={lessonLocked}
       initialAnswers={exam?.answers ?? {}}
     />
   );
@@ -514,7 +520,13 @@ export default function ExamPage() {
   return (
     <AuthGuard requirePortalRoles={["user", "school_admin"]}>
       <ExamAccessGate mode="learn-exam">
-        <ExamContent />
+        <Suspense
+          fallback={
+            <div className="max-w-3xl mx-auto px-4 py-16 text-center text-gray-500">กำลังโหลดแบบทดสอบ...</div>
+          }
+        >
+          <ExamContent />
+        </Suspense>
       </ExamAccessGate>
     </AuthGuard>
   );

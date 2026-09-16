@@ -58,6 +58,7 @@ function ProjectsManagementContent() {
     deleteProjectQuestion,
     gradeProjectExams,
     bulkSaveAnswerKeys,
+    adminToken,
   } = useIctStore();
 
   const siteProject = getSiteProject(projects);
@@ -117,6 +118,7 @@ function ProjectsManagementContent() {
   // Grading Result Modal State
   const [gradingResult, setGradingResult] = useState<{ gradedCount: number; passedCount: number; pendingCount: number } | null>(null);
   const [isGrading, setIsGrading] = useState(false);
+  const [gradeConfirm, setGradeConfirm] = useState<{ unsubmittedCount: number } | null>(null);
 
   const currentProject = siteProject;
   const projectVideos = videos.filter((v) => v.project_id === selectedProjectId);
@@ -307,7 +309,7 @@ function ProjectsManagementContent() {
         return;
       }
     }
-    showStatus("จัดลำดับคำถามแล้ว เลขข้อทั้งชุดจะเรียงตามส่วน");
+    showStatus("จัดลำดับคำถามแล้ว เลขข้อทั้งชุดจะเรียงตามบทเรียน");
   };
 
   const handleDeleteQuestion = async (id: string) => {
@@ -318,27 +320,48 @@ function ProjectsManagementContent() {
     }
   };
 
-  // Manual Grading Trigger Action
+  const runGrading = async () => {
+    if (!currentProject) return;
+    setIsGrading(true);
+    setGradeConfirm(null);
+    const res = await gradeProjectExams(selectedProjectId);
+    setIsGrading(false);
+    if (res.ok) {
+      setGradingResult({
+        gradedCount: res.gradedCount,
+        passedCount: res.passedCount,
+        pendingCount: res.pendingCount,
+      });
+      showStatus(
+        res.pendingCount > 0
+          ? `ประมวลผลแล้ว โดยยังไม่ตรวจ ${res.pendingCount} ข้อที่ไม่มีเฉลย`
+          : "ประมวลผลการตรวจคำตอบเรียบร้อยแล้ว"
+      );
+    } else {
+      showStatus(res.error, true);
+    }
+  };
+
   const handleTriggerGrading = async () => {
     if (!currentProject) return;
-    if (confirm(`ยืนยันการเริ่มระบบ "ตรวจคำตอบ (Grade Exams)" สำหรับโครงการ ${currentProject.name}?`)) {
-      setIsGrading(true);
-      const res = await gradeProjectExams(selectedProjectId);
+    if (!adminToken) {
+      showStatus("กรุณาเข้าสู่ระบบผู้ดูแลใหม่", true);
+      return;
+    }
+    setIsGrading(true);
+    try {
+      const { adminExportExamResponsesRpc } = await import("@/lib/supabase/admin");
+      const rows = await adminExportExamResponsesRpc(adminToken, selectedProjectId);
+      const unsubmittedCount = rows.filter((row) => row.status !== "submitted").length;
       setIsGrading(false);
-      if (res.ok) {
-        setGradingResult({
-          gradedCount: res.gradedCount,
-          passedCount: res.passedCount,
-          pendingCount: res.pendingCount,
-        });
-        showStatus(
-          res.pendingCount > 0
-            ? `ประมวลผลแล้ว โดยยังไม่ตรวจ ${res.pendingCount} ข้อที่ไม่มีเฉลย`
-            : "ประมวลผลการตรวจคำตอบเรียบร้อยแล้ว"
-        );
-      } else {
-        showStatus(res.error, true);
+      if (unsubmittedCount > 0) {
+        setGradeConfirm({ unsubmittedCount });
+        return;
       }
+      await runGrading();
+    } catch (err) {
+      setIsGrading(false);
+      showStatus(err instanceof Error ? err.message : "ตรวจสอบสถานะผู้เข้าสอบไม่สำเร็จ", true);
     }
   };
 
@@ -659,7 +682,7 @@ function ProjectsManagementContent() {
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
-                🎬 วิดีโอบทเรียน ({projectVideos.length})
+                🎬 บทเรียน / วิดีโอ ({projectVideos.length})
               </button>
               <button
                 type="button"
@@ -873,8 +896,8 @@ function ProjectsManagementContent() {
                 <div>
                   <div className="flex justify-between items-center mb-6">
                     <div>
-                      <h2 className="text-xl font-bold text-gray-800">วิดีโอบทเรียน ({projectVideos.length})</h2>
-                      <p className="text-xs text-gray-500">จัดการลิงก์วิดีโอ YouTube</p>
+                      <h2 className="text-xl font-bold text-gray-800">บทเรียน / วิดีโอ ({projectVideos.length})</h2>
+                      <p className="text-xs text-gray-500">จัดการลิงก์วิดีโอ YouTube ตามลำดับบทเรียนที่ 1, 2, …</p>
                     </div>
                     <button
                       type="button"
@@ -1036,7 +1059,7 @@ function ProjectsManagementContent() {
                   />
 
                   <h3 className="font-bold text-gray-800 text-lg mb-4">📝 กำหนดเฉลยคำตอบรายข้อ</h3>
-                  <p className="mb-3 text-xs text-gray-500">เลขข้อเรียงตามลำดับส่วน แล้วตามลำดับคำถามในส่วน</p>
+                  <p className="mb-3 text-xs text-gray-500">เลขข้อเรียงตามลำดับบทเรียน แล้วตามลำดับคำถามในบท</p>
                   <ExamAnswerTree
                     sections={examSections}
                     questions={projectQuestions}
@@ -1082,10 +1105,10 @@ function ProjectsManagementContent() {
       {showVideoModal && (
         <ModalOverlay onBackdropClick={() => setShowVideoModal(false)}>
           <div className="bg-white rounded-3xl w-full p-8 shadow-2xl border border-gray-100">
-            <h3 className="text-xl font-bold text-[var(--primary-blue)] mb-4">เพิ่ม/แก้ไขวิดีโอบทเรียน</h3>
+            <h3 className="text-xl font-bold text-[var(--primary-blue)] mb-4">เพิ่ม/แก้ไขบทเรียน (วิดีโอ)</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">ชื่อคลิปบทเรียน:</label>
+                <label className="block text-xs font-bold text-gray-700 mb-1">ชื่อบทเรียน:</label>
                 <input
                   type="text"
                   className={inputClass}
@@ -1172,16 +1195,16 @@ function ProjectsManagementContent() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">ส่วนข้อสอบ:</label>
+                <label className="block text-xs font-bold text-gray-700 mb-1">บทเรียน:</label>
                 <select
                   className={inputClass}
                   value={qForm.section_id}
                   onChange={(e) => setQForm((prev) => ({ ...prev, section_id: e.target.value }))}
                 >
-                  <option value="">ไม่ระบุส่วน</option>
+                  <option value="">ไม่ระบุบทเรียน</option>
                   {examSections.map((section, index) => (
                     <option key={section.id} value={section.id}>
-                      ส่วนที่ {index + 1}: {section.title}
+                      บทเรียนที่ {index + 1}: {section.title}
                     </option>
                   ))}
                 </select>
@@ -1315,6 +1338,39 @@ function ProjectsManagementContent() {
                 onClick={() => void handleSaveQuestion()}
               >
                 บันทึกคำถาม
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {gradeConfirm && currentProject && (
+        <ModalOverlay onBackdropClick={() => !isGrading && setGradeConfirm(null)} panelMaxWidthClass="max-w-md">
+          <div className="bg-white rounded-3xl w-full p-8 shadow-2xl border border-amber-100">
+            <h3 className="text-xl font-extrabold text-amber-900 mb-2">พบผู้เข้าสอบที่ยังไม่ส่งคำตอบ</h3>
+            <p className="text-sm text-gray-600 mb-2">
+              มีผู้เข้าสอบบางท่านที่ยังไม่ได้กดส่งคำตอบ (สถานะยังเป็นร่าง) จำนวน{" "}
+              <span className="font-extrabold text-amber-800">{gradeConfirm.unsubmittedCount}</span> รายการ
+            </p>
+            <p className="text-sm text-gray-600 mb-6">
+              คุณต้องการดำเนินการประมวลผลคะแนนทันทีหรือไม่? ระบบจะตรวจเฉพาะผู้ที่ส่งแล้วเท่านั้น
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-end">
+              <button
+                type="button"
+                disabled={isGrading}
+                className="px-5 py-2.5 rounded-full border border-gray-300 font-bold text-gray-700 text-sm hover:bg-gray-50 disabled:opacity-40"
+                onClick={() => setGradeConfirm(null)}
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={isGrading}
+                className="px-6 py-2.5 rounded-full bg-amber-600 text-white font-bold text-sm hover:bg-amber-700 shadow disabled:opacity-60"
+                onClick={() => void runGrading()}
+              >
+                {isGrading ? "กำลังประมวลผล..." : "ยืนยันการประมวลผล"}
               </button>
             </div>
           </div>

@@ -140,11 +140,18 @@ export type WatchProgress = {
   last_updated: string;
 };
 
+export type LessonSubmissionStatus = {
+  status: "submitted";
+  submitted_at?: string;
+};
+
 export type ExamProgress = {
   candidate_id: string;
   project_id?: string;
   answers: Record<string, string>;
   status: "draft" | "submitted";
+  /** Per-lesson (section_id) submit map — independent of overall status until all lessons are in. */
+  lesson_submissions?: Record<string, LessonSubmissionStatus>;
   score?: number;
   passed?: boolean;
   graded_at?: string;

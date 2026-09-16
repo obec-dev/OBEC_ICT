@@ -122,7 +122,7 @@ type IctStoreValue = {
   /** False until a candidate's exam rows have been loaded from the database. */
   examProgressReady: boolean;
   examProgressError: string | null;
-  reloadExamProgress: () => Promise<void>;
+  reloadExamProgress: (opts?: { silent?: boolean }) => Promise<void>;
   projects: LearningProject[];
   videos: ProjectVideo[];
   questions: ProjectQuestion[];
@@ -188,10 +188,13 @@ type IctStoreValue = {
     answers: Record<string, string>,
     projectId?: string
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
-  submitExam: (
+  /** Submit one lesson/section; overall status becomes submitted when every lesson is submitted. */
+  submitExamLesson: (
     answers: Record<string, string>,
+    sectionId: string,
+    allSectionIds: string[],
     projectId?: string
-  ) => Promise<{ ok: true } | { ok: false; error: string }>;
+  ) => Promise<{ ok: true; allDone: boolean } | { ok: false; error: string }>;
   unlockExamForCandidate: (
     candidateId: string,
     projectId?: string
@@ -302,19 +305,24 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     clearStoredExamAnswers();
   }, []);
 
-  const loadCandidateExamProgress = useCallback(async (candidate: Pick<Candidate, "id" | "phone">) => {
-    setExamProgressReady(false);
-    setExamProgressError(null);
-    try {
-      const rows = await fetchMyExamProgress(candidate.id, candidate.phone);
-      setExamProgress(rows);
-    } catch (err) {
-      setExamProgress([]);
-      setExamProgressError(err instanceof Error ? err.message : "โหลดคำตอบข้อสอบไม่สำเร็จ");
-    } finally {
-      setExamProgressReady(true);
-    }
-  }, []);
+  const loadCandidateExamProgress = useCallback(
+    async (candidate: Pick<Candidate, "id" | "phone">, opts?: { silent?: boolean }) => {
+      if (!opts?.silent) {
+        setExamProgressReady(false);
+      }
+      setExamProgressError(null);
+      try {
+        const rows = await fetchMyExamProgress(candidate.id, candidate.phone);
+        setExamProgress(rows);
+      } catch (err) {
+        setExamProgress([]);
+        setExamProgressError(err instanceof Error ? err.message : "โหลดคำตอบข้อสอบไม่สำเร็จ");
+      } finally {
+        setExamProgressReady(true);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     const persisted = readPersistedState();
@@ -747,13 +755,16 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     [forgetExamProgress, persistSession, session]
   );
 
-  const reloadExamProgress = useCallback(async () => {
-    if (session?.kind !== "candidate") {
-      forgetExamProgress();
-      return;
-    }
-    await loadCandidateExamProgress(session.candidate);
-  }, [forgetExamProgress, loadCandidateExamProgress, session]);
+  const reloadExamProgress = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (session?.kind !== "candidate") {
+        forgetExamProgress();
+        return;
+      }
+      await loadCandidateExamProgress(session.candidate, opts);
+    },
+    [forgetExamProgress, loadCandidateExamProgress, session]
+  );
 
   const saveWatchProgress = useCallback(
     async (partial: Omit<WatchProgress, "candidate_id" | "last_updated">) => {
@@ -815,24 +826,30 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         const examStatus = getProjectExamStatus(project);
         if (!examStatus.open) return { ok: false as const, error: examStatus.message };
 
+        const mergedAnswers = { ...(existing?.answers ?? {}), ...answers };
         await upsertExamProgressToDb({
           profile_id: candidateId,
           phone: session.candidate.phone,
           project_id: pId,
-          answers,
+          answers: mergedAnswers,
           status: "draft",
         });
         const next: ExamProgress = {
           candidate_id: candidateId,
           project_id: pId,
-          answers,
+          answers: mergedAnswers,
           status: "draft",
+          lesson_submissions: existing?.lesson_submissions ?? {},
           updated_at: new Date().toISOString(),
         };
         setExamProgress((prev) => {
           const row = prev.find((e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id));
           if (!row) return [...prev, next];
-          return prev.map((e) => (e.candidate_id === candidateId && (e.project_id === pId || !e.project_id) ? next : e));
+          return prev.map((e) =>
+            e.candidate_id === candidateId && (e.project_id === pId || !e.project_id)
+              ? { ...next, lesson_submissions: e.lesson_submissions ?? next.lesson_submissions }
+              : e
+          );
         });
         return { ok: true as const };
       } catch (err) {
@@ -842,8 +859,13 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     [activeProjectId, examProgress, projects, session]
   );
 
-  const submitExam = useCallback(
-    async (answers: Record<string, string>, targetProjectId?: string) => {
+  const submitExamLesson = useCallback(
+    async (
+      answers: Record<string, string>,
+      sectionId: string,
+      allSectionIds: string[],
+      targetProjectId?: string
+    ) => {
       if (session?.kind !== "candidate") return { ok: false as const, error: "ไม่ได้เข้าสู่ระบบ" };
       const candidateId = session.candidate.id;
       const pId = targetProjectId || activeProjectId;
@@ -858,31 +880,48 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           (e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id)
         );
         if (existing?.status === "submitted") {
-          return { ok: false as const, error: "ส่งข้อสอบแล้ว ไม่สามารถส่งซ้ำได้" };
+          return { ok: false as const, error: "ส่งข้อสอบครบทุกบทแล้ว ไม่สามารถส่งซ้ำได้" };
+        }
+        if (existing?.lesson_submissions?.[sectionId]?.status === "submitted") {
+          return { ok: false as const, error: "ส่งแบบทดสอบบทเรียนนี้แล้ว" };
         }
         const examStatus = getProjectExamStatus(project);
         if (!examStatus.open) return { ok: false as const, error: examStatus.message };
+
+        const mergedAnswers = { ...(existing?.answers ?? {}), ...answers };
+        const submittedAt = new Date().toISOString();
+        const lesson_submissions = {
+          ...(existing?.lesson_submissions ?? {}),
+          [sectionId]: { status: "submitted" as const, submitted_at: submittedAt },
+        };
+        const sectionKeys = allSectionIds.filter(Boolean);
+        const allDone =
+          sectionKeys.length > 0 &&
+          sectionKeys.every((id) => lesson_submissions[id]?.status === "submitted");
+        const status = allDone ? ("submitted" as const) : ("draft" as const);
 
         await upsertExamProgressToDb({
           profile_id: candidateId,
           phone: session.candidate.phone,
           project_id: pId,
-          answers,
-          status: "submitted",
+          answers: mergedAnswers,
+          status,
+          lesson_submissions,
         });
         const next: ExamProgress = {
           candidate_id: candidateId,
           project_id: pId,
-          answers,
-          status: "submitted",
-          updated_at: new Date().toISOString(),
+          answers: mergedAnswers,
+          status,
+          lesson_submissions,
+          updated_at: submittedAt,
         };
         setExamProgress((prev) => {
           const row = prev.find((e) => e.candidate_id === candidateId && (e.project_id === pId || !e.project_id));
           if (!row) return [...prev, next];
           return prev.map((e) => (e.candidate_id === candidateId && (e.project_id === pId || !e.project_id) ? next : e));
         });
-        return { ok: true as const };
+        return { ok: true as const, allDone };
       } catch (err) {
         return { ok: false as const, error: err instanceof Error ? err.message : "ส่งข้อสอบไม่สำเร็จ" };
       }
@@ -912,6 +951,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
                 project_id: pId,
                 answers: {},
                 status: "draft" as const,
+                lesson_submissions: {},
                 updated_at: new Date().toISOString(),
               },
             ];
@@ -921,6 +961,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
               ? {
                   ...e,
                   status: "draft" as const,
+                  lesson_submissions: {},
                   score: undefined,
                   passed: undefined,
                   graded_at: undefined,
@@ -1093,7 +1134,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       logout,
       saveWatchProgress,
       saveExamDraft,
-      submitExam,
+      submitExamLesson,
       unlockExamForCandidate,
       adminUpdateCandidate,
       updateCandidateProfile,
@@ -1146,7 +1187,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       saveWatchProgress,
       schoolTotals,
       session,
-      submitExam,
+      submitExamLesson,
       unlockExamForCandidate,
       videos,
       watchProgress,

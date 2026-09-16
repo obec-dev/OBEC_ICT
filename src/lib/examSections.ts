@@ -43,7 +43,7 @@ export function groupQuestionsBySection(
     const sample = list[0];
     parts.push({
       id,
-      title: sample?.section_title?.trim() || (id === UNSECTIONED_ID ? "ยังไม่ระบุส่วน" : "ส่วนข้อสอบ"),
+      title: sample?.section_title?.trim() || (id === UNSECTIONED_ID ? "ยังไม่ระบุบทเรียน" : "บทเรียน"),
       description: sample?.section_description?.trim() || "",
       order: sample?.section_order ?? 9999,
     });

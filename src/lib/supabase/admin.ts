@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
 import { parseDistrictIdList } from "@/lib/supabase/data";
-import type { AdminRole, AdminUser, Candidate, PortalRole } from "@/types/ict";
+import type { AdminRole, AdminUser, Candidate, ExamProgress, PortalRole } from "@/types/ict";
 
 function asObj(data: unknown): Record<string, unknown> {
   if (data && typeof data === "object" && !Array.isArray(data)) {
@@ -343,6 +343,7 @@ export async function adminListExamProgressRpc(
     project_id?: string;
     answers: Record<string, string>;
     status: "draft" | "submitted";
+    lesson_submissions?: ExamProgress["lesson_submissions"];
     score?: number;
     passed?: boolean;
     graded_at?: string;
@@ -365,6 +366,10 @@ export async function adminListExamProgressRpc(
       project_id: row.project_id ? String(row.project_id) : undefined,
       answers: (row.answers as Record<string, string>) || {},
       status: row.status === "submitted" ? ("submitted" as const) : ("draft" as const),
+      lesson_submissions:
+        row.lesson_submissions && typeof row.lesson_submissions === "object"
+          ? (row.lesson_submissions as ExamProgress["lesson_submissions"])
+          : {},
       score: row.score != null ? Number(row.score) : undefined,
       passed: typeof row.passed === "boolean" ? row.passed : undefined,
       graded_at: row.graded_at ? String(row.graded_at) : undefined,

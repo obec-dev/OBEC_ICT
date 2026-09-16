@@ -31,7 +31,7 @@ export function ExamQuestionTree({
   if (parts.length === 0) {
     return (
       <div className="p-12 text-center text-gray-400 bg-gray-50 rounded-2xl border border-dashed">
-        สร้างส่วนข้อสอบก่อน แล้วเพิ่มคำถามใต้ส่วนนั้น
+        สร้างบทเรียนก่อน แล้วเพิ่มคำถามใต้บทนั้น
       </div>
     );
   }
@@ -49,7 +49,7 @@ export function ExamQuestionTree({
             >
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider text-[var(--primary-blue)]">
-                  ส่วนที่ {partIndex + 1}
+                  บทเรียนที่ {partIndex + 1}
                 </p>
                 <h3 className="text-lg font-extrabold text-[var(--primary-blue)]">{part.title}</h3>
                 <p className="text-xs text-gray-500">

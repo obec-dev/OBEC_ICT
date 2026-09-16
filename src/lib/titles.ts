@@ -20,12 +20,6 @@ export const TITLE_OPTIONS: TitleOption[] = [
   { key: "mr", en: "Mr.", th: "นาย" },
   { key: "miss", en: "Miss", th: "นางสาว" },
   { key: "mrs", en: "Mrs.", th: "นาง" },
-  { key: "ms", en: "Ms.", th: "คุณ" },
-  { key: "dr", en: "Dr.", th: "ดร." },
-  { key: "asst_prof", en: "Asst. Prof.", th: "ผศ." },
-  { key: "assoc_prof", en: "Assoc. Prof.", th: "รศ." },
-  { key: "prof", en: "Prof.", th: "ศ." },
-  { key: "other", en: "Other", th: "อื่นๆ" },
 ];
 
 export function getTitleByKey(key: TitleKey | ""): TitleOption | undefined {

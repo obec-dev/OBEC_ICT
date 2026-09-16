@@ -1059,22 +1059,44 @@ export async function upsertExamProgressToDb(input: {
   project_id: string;
   answers: Record<string, string>;
   status: "draft" | "submitted";
+  lesson_submissions?: Record<string, { status: "submitted"; submitted_at?: string }>;
 }) {
   if (!input.project_id?.trim()) {
     throw new Error("ไม่พบโครงการ");
   }
   const supabase = createClient();
-  const { data, error } = await supabase.rpc("upsert_exam_progress", {
+  const payload: Record<string, unknown> = {
     p_profile_id: input.profile_id,
     p_phone: input.phone,
     p_project_id: input.project_id,
     p_answers: input.answers,
     p_status: input.status,
-  });
+  };
+  if (input.lesson_submissions) {
+    payload.p_lesson_submissions = input.lesson_submissions;
+  }
+  const { data, error } = await supabase.rpc("upsert_exam_progress", payload);
   if (error) throw new Error(error.message);
 
   const row = asRpcObj(data);
   if (!row.ok) throw new Error(String(row.error ?? "บันทึกข้อสอบไม่สำเร็จ"));
+}
+
+function asLessonSubmissions(
+  value: unknown
+): Record<string, { status: "submitted"; submitted_at?: string }> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, { status: "submitted"; submitted_at?: string }> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const item = asRpcObj(raw);
+    if (item.status === "submitted") {
+      out[key] = {
+        status: "submitted",
+        submitted_at: item.submitted_at ? String(item.submitted_at) : undefined,
+      };
+    }
+  }
+  return out;
 }
 
 function asAnswerMap(value: unknown): Record<string, string> {
@@ -1115,6 +1137,7 @@ export async function fetchMyExamProgress(profileId: string, phone: string): Pro
       project_id: exam.project_id ? String(exam.project_id) : undefined,
       answers: asAnswerMap(exam.answers),
       status: exam.status === "submitted" ? ("submitted" as const) : ("draft" as const),
+      lesson_submissions: asLessonSubmissions(exam.lesson_submissions),
       score: exam.score != null ? Number(exam.score) : undefined,
       passed: typeof exam.passed === "boolean" ? exam.passed : undefined,
       graded_at: exam.graded_at ? String(exam.graded_at) : undefined,

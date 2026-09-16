@@ -802,7 +802,6 @@ export default function RegisterFormPage() {
                         <option value="">-- เลือก --</option>
                         <option value="male">ชาย / Male</option>
                         <option value="female">หญิง / Female</option>
-                        <option value="other">อื่นๆ / Other</option>
                       </select>
                       <FieldError message={err(person.key, "gender")} />
                     </div>

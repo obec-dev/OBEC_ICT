@@ -15,6 +15,7 @@ import {
 } from "@/lib/supabase/admin";
 import { searchSchoolsByName } from "@/lib/supabase/data";
 import { inputClass } from "@/lib/styles";
+import { canAdminUnlockExam, countSubmittedLessons, hasPartialLessonSubmit } from "@/lib/lessonExamMap";
 import type { Candidate, ExamProgress } from "@/types/ict";
 
 function examStatusLabel(exam: ExamProgress | undefined): { text: string; className: string } {
@@ -27,6 +28,13 @@ function examStatusLabel(exam: ExamProgress | undefined): { text: string; classN
         return { text: "ส่งแล้ว · ไม่ผ่าน", className: "bg-red-100 text-red-800" };
     }
     return { text: "ส่งข้อสอบแล้ว", className: "bg-blue-100 text-blue-800" };
+  }
+  if (hasPartialLessonSubmit(exam)) {
+    const n = countSubmittedLessons(exam);
+    return {
+      text: n > 1 ? `ส่งบางบทแล้ว (${n} บท)` : "ส่งบางบทแล้ว",
+      className: "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200",
+    };
   }
   return { text: "ฉบับร่าง / กำลังทำ", className: "bg-amber-100 text-amber-800" };
 }
@@ -210,6 +218,7 @@ function CandidatesContent() {
         [profileId]: {
           ...current,
           status: "draft",
+          lesson_submissions: {},
           score: undefined,
           passed: undefined,
           graded_at: undefined,
@@ -280,7 +289,8 @@ function CandidatesContent() {
           </button>
         </div>
         <p className="text-xs text-gray-400">
-          การปลดล็อกข้อสอบจะเปลี่ยนสถานะไปเป็นฉบับร่าง โดยคงคำตอบเดิมไว้ทั้งหมด — หากลบข้อมูลที่เคยถูกบันทึกไว้จะหายไปทั้งหมด
+          การปลดล็อกข้อสอบจะเปลี่ยนสถานะไปเป็นฉบับร่าง ยกเลิกการล็อกแบบทดสอบรายบทที่ส่งแล้ว
+          โดยคงคำตอบเดิมไว้ — ใช้ได้ทั้งส่งครบทุกบทและส่งบางบท (สถานะ &quot;ส่งบางบทแล้ว&quot;)
         </p>
       </div>
 
@@ -327,7 +337,7 @@ function CandidatesContent() {
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
-                            disabled={unlockingId === row.id || exam?.status !== "submitted"}
+                            disabled={unlockingId === row.id || !canAdminUnlockExam(exam)}
                             onClick={() => void unlockExam(row.id)}
                             className="rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-900 disabled:opacity-40"
                           >

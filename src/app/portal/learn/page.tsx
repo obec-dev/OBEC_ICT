@@ -6,6 +6,12 @@ import { AuthGuard } from "@/app/components/AuthGuard";
 import { ExamAccessGate } from "@/app/components/ExamAccessGate";
 import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { useIctStore } from "@/contexts/IctStore";
+import {
+  lessonQuizHref,
+  lessonQuizStatusLabel,
+  pairVideosWithExamParts,
+  sectionAnswerStatus,
+} from "@/lib/lessonExamMap";
 import { getSiteProject } from "@/lib/siteSettings";
 import type { ProjectVideo } from "@/types/ict";
 
@@ -32,13 +38,32 @@ type YTPlayer = {
 };
 
 function LearnContent() {
-  const { currentCandidate, getWatchFor, saveWatchProgress, isAdmin, projects, videos } = useIctStore();
+  const {
+    currentCandidate,
+    getWatchFor,
+    getExamFor,
+    saveWatchProgress,
+    isAdmin,
+    projects,
+    videos,
+    questions,
+  } = useIctStore();
 
   const currentProject = useMemo(() => getSiteProject(projects), [projects]);
   const projectVideos = useMemo(
     () => videos.filter((v) => v.project_id === currentProject?.id),
     [videos, currentProject?.id]
   );
+  const projectQuestions = useMemo(
+    () => questions.filter((q) => q.project_id === currentProject?.id),
+    [questions, currentProject?.id]
+  );
+  const lessonPairs = useMemo(
+    () => pairVideosWithExamParts(projectVideos, projectQuestions),
+    [projectVideos, projectQuestions]
+  );
+  const exam = currentCandidate ? getExamFor(currentCandidate.id, currentProject?.id) : undefined;
+  const examLocked = exam?.status === "submitted";
 
   const [selectedVideoId, setSelectedVideoId] = useState<string>("");
 
@@ -264,58 +289,62 @@ function LearnContent() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-12 animate-fade-in-up">
       <div className="bg-white/70 backdrop-blur-md p-8 rounded-3xl shadow-sm border border-white/60 mb-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <span className="text-xs font-bold text-[var(--accent-red)] uppercase tracking-wider bg-red-50 px-3 py-1 rounded-full border border-red-100 mb-2 inline-block">
-              ศูนย์การเรียนรู้ออนไลน์
-            </span>
-            <h1 className="text-3xl font-extrabold text-[var(--primary-blue)]">
-              {currentProject.name || "บทเรียนสำหรับตัวแทน ICT Talent"}
-            </h1>
-            <p className="text-gray-600 text-sm mt-1">
-              {currentProject.description || "รับชมวิดีโอเพื่อเรียนรู้ตามความสะดวก (รับชมได้ไม่จำกัดจำนวนครั้ง)"}
-            </p>
-          </div>
-
-          <Link
-            href="/portal/exam"
-            className="self-start md:self-center shrink-0 rounded-full bg-[var(--primary-blue)] text-white px-6 py-3 font-bold hover:bg-blue-900 transition-all shadow-md flex items-center gap-2"
-          >
-            <span>ไปยังหน้าข้อสอบ</span>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-            </svg>
-          </Link>
+        <div>
+          <span className="text-xs font-bold text-[var(--accent-red)] uppercase tracking-wider bg-red-50 px-3 py-1 rounded-full border border-red-100 mb-2 inline-block">
+            บทเรียนและแบบทดสอบ
+          </span>
+          <h1 className="text-3xl font-extrabold text-[var(--primary-blue)]">
+            {currentProject.name || "บทเรียนสำหรับตัวแทน ICT Talent"}
+          </h1>
+          <p className="text-gray-600 text-sm mt-1">
+            {currentProject.description ||
+              "รับชมวิดีโอแต่ละบท แล้วทำแบบทดสอบประจำบทเรียนนั้น — สลับบทได้จากหน้านี้อย่างเดียว"}
+          </p>
         </div>
       </div>
 
-      {projectVideos.length > 1 && (
-        <div className="mb-6 flex flex-wrap gap-2">
-          {projectVideos.map((v, index) => {
+      {lessonPairs.length > 0 && (
+        <div className="mb-5 overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-700 bg-white/80 dark:bg-slate-950/80 shadow-sm divide-y divide-slate-100 dark:divide-slate-800">
+          {lessonPairs.map(({ video: v, part, lessonIndex }) => {
             const watch = currentCandidate ? getWatchFor(currentCandidate.id, v.video_id) : undefined;
             const done = Boolean(watch?.completed);
             const inProgress = !done && Boolean(watch?.watched_seconds && watch.watched_seconds > 0);
+            const quizStatus = part ? sectionAnswerStatus(part, exam?.answers, exam) : "empty";
+            const selected = activeVideo?.id === v.id;
             return (
               <button
                 key={v.id}
                 type="button"
                 onClick={() => setSelectedVideoId(v.id)}
-                className={`px-4 py-2.5 rounded-2xl text-base font-semibold flex items-center gap-2 border transition-all ${
-                  activeVideo?.id === v.id
-                    ? "border-[var(--primary-blue)] bg-blue-50/80 text-[var(--primary-blue)] dark:text-white shadow-sm"
-                    : "border-gray-200 bg-white text-gray-800 dark:text-white hover:border-gray-300"
+                className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
+                  selected
+                    ? "bg-blue-50/90 dark:bg-slate-900 border-l-4 border-l-[var(--primary-blue)]"
+                    : "hover:bg-slate-50 dark:hover:bg-slate-900/60 border-l-4 border-l-transparent"
                 }`}
               >
-                <span>
-                  คลิปที่ {index + 1}: {v.title}
+                <span className="shrink-0 w-8 h-8 rounded-lg bg-[var(--primary-blue)] text-white text-xs font-extrabold flex items-center justify-center">
+                  {lessonIndex}
                 </span>
-                {v.is_mandatory && (
-                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                    สำคัญสำหรับการสอบ
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-slate-900 dark:text-white truncate">
+                    บทเรียนที่ {lessonIndex}: {v.title}
                   </span>
-                )}
-                {done && <span className="text-[10px] font-bold text-emerald-700">✓ รับชมครบแล้ว</span>}
-                {inProgress && <span className="text-[10px] font-bold text-blue-600">▶ กำลังรับชม</span>}
+                  <span className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] font-bold">
+                    {v.is_mandatory && <span className="text-amber-700">สำคัญ</span>}
+                    {done && <span className="text-emerald-700">✓ รับชมครบ</span>}
+                    {inProgress && <span className="text-blue-600">▶ กำลังรับชม</span>}
+                    {part && quizStatus === "submitted" && (
+                      <span className="text-emerald-700">✓ ส่งแบบทดสอบแล้ว</span>
+                    )}
+                    {part && quizStatus === "complete" && (
+                      <span className="text-amber-700">ตอบครบ · ยังไม่ส่ง</span>
+                    )}
+                    {part && quizStatus === "in_progress" && (
+                      <span className="text-amber-700">◐ กำลังทำแบบทดสอบ</span>
+                    )}
+                    {!part && <span className="text-gray-400">ยังไม่มีแบบทดสอบ</span>}
+                  </span>
+                </span>
               </button>
             );
           })}
@@ -357,20 +386,61 @@ function LearnContent() {
         )}
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-4 bg-white/70 backdrop-blur-md p-5 rounded-2xl border border-white/60 shadow-sm">
-        <div className="flex items-center gap-3">
+      <div className="mt-6 space-y-4 bg-white/70 backdrop-blur-md p-5 rounded-2xl border border-white/60 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
           {saving && <span className="text-xs text-gray-400 animate-pulse">กำลังบันทึก...</span>}
           {!saving && saveMessage && (
             <span className="text-sm text-[var(--accent-green)] font-semibold">{saveMessage}</span>
           )}
         </div>
 
-        <Link
-          href="/portal/exam"
-          className="rounded-full border-2 border-[var(--primary-blue)] text-[var(--primary-blue)] px-6 py-2.5 text-sm font-bold hover:bg-blue-50 transition-all"
-        >
-          เข้าทำข้อสอบ →
-        </Link>
+        {(() => {
+          const activePair = lessonPairs.find((pair) => pair.video.id === activeVideo?.id);
+          if (!activePair) return null;
+          const quizStatus = activePair.part
+            ? sectionAnswerStatus(activePair.part, exam?.answers, exam)
+            : "empty";
+          return (
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-t border-gray-100 pt-4">
+              <div>
+                <p className="text-sm font-bold text-[var(--primary-blue)]">
+                  แบบทดสอบประจำบทเรียนที่ {activePair.lessonIndex}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {activePair.part
+                    ? `${activePair.part.title} · ${lessonQuizStatusLabel(quizStatus)}`
+                    : "ยังไม่ได้ผูกแบบทดสอบกับวิดีโอนี้ (เรียงตามลำดับบทเรียนที่ 1, 2, …)"}
+                </p>
+              </div>
+              {activePair.part ? (
+                <Link
+                  href={lessonQuizHref(
+                    activePair.video.id,
+                    activePair.lessonIndex,
+                    activePair.part?.id
+                  )}
+                  className={`inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-bold shadow-md transition-all ${
+                    examLocked || quizStatus === "submitted"
+                      ? "bg-gray-200 text-gray-600"
+                      : "bg-[var(--primary-blue)] text-white hover:bg-blue-900"
+                  }`}
+                >
+                  {examLocked || quizStatus === "submitted"
+                    ? "ดูแบบทดสอบประจำบทเรียนนี้"
+                    : quizStatus === "complete"
+                      ? "ส่ง / แก้ไขแบบทดสอบประจำบทเรียนนี้"
+                      : quizStatus === "in_progress"
+                        ? "ทำแบบทดสอบประจำบทเรียนนี้ต่อ"
+                        : "ทำแบบทดสอบประจำบทเรียนนี้"}
+                </Link>
+              ) : (
+                <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-4 py-2">
+                  ยังไม่มีแบบทดสอบสำหรับบทนี้
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {saveError && <p className="mt-3 text-sm text-[var(--accent-red)] font-semibold">{saveError}</p>}

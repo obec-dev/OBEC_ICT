@@ -319,7 +319,7 @@ export async function upsertExamSection(token: string, section: ExamSection): Pr
     },
   });
   if (error) throw new Error(error.message);
-  assertAdminRpcOk(data, "บันทึกส่วนข้อสอบไม่สำเร็จ");
+  assertAdminRpcOk(data, "บันทึกบทเรียนไม่สำเร็จ");
 }
 
 export async function deleteExamSectionDb(token: string, sectionId: string): Promise<void> {
@@ -329,7 +329,7 @@ export async function deleteExamSectionDb(token: string, sectionId: string): Pro
     p_section_id: sectionId,
   });
   if (error) throw new Error(error.message);
-  assertAdminRpcOk(data, "ลบส่วนข้อสอบไม่สำเร็จ");
+  assertAdminRpcOk(data, "ลบบทเรียนไม่สำเร็จ");
 }
 
 type RpcClient = {

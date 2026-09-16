@@ -29,7 +29,7 @@ export function ExamAnswerTree({ sections, questions, onSaveAnswer }: Props) {
               onClick={() => setOpenSections((prev) => ({ ...prev, [part.id]: !open }))}
             >
               <span>
-                <span className="block text-xs font-bold text-emerald-800">ส่วนที่ {partIndex + 1}</span>
+                <span className="block text-xs font-bold text-emerald-800">บทเรียนที่ {partIndex + 1}</span>
                 <span className="text-base font-extrabold text-emerald-950">{part.title}</span>
               </span>
               <span className="text-xs font-bold text-emerald-800">{open ? "ย่อ" : "ขยาย"}</span>

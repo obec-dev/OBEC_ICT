@@ -46,20 +46,12 @@ export function Nav() {
                 </Link>
               )}
               {showLearnExam && (
-                <>
-                  <Link
-                    href="/portal/learn"
-                    className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
-                  >
-                    บทเรียน
-                  </Link>
-                  <Link
-                    href="/portal/exam"
-                    className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
-                  >
-                    ข้อสอบ
-                  </Link>
-                </>
+                <Link
+                  href="/portal/learn"
+                  className="text-lg font-semibold text-[var(--primary-blue)] hover:text-[var(--accent-red)] transition-colors py-2"
+                >
+                  บทเรียนและแบบทดสอบ
+                </Link>
               )}
               {session?.kind === "business" && (
                 <Link
