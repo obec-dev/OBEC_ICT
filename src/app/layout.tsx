@@ -18,7 +18,9 @@ export const metadata: Metadata = {
   title: "ตัวแทน ICT Talent ประจำโรงเรียน",
   description: "แพลตฟอร์มลงทะเบียนและสอบคัดเลือกตัวแทน ICT ประจำโรงเรียน",
   icons: {
-    icon: `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏫</text></svg>`,
+    icon: [{ url: "/OBEC_ICT_Favcon.jpeg", type: "image/jpeg" }],
+    apple: [{ url: "/OBEC_ICT_Favcon.jpeg", type: "image/jpeg" }],
+    shortcut: "/OBEC_ICT_Favcon.jpeg",
   },
 };
 

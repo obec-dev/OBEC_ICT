@@ -102,6 +102,14 @@ export default function LoginPage() {
 
   return (
     <div className="max-w-md mx-auto px-4 py-16 animate-fade-in-up">
+      <div className="mb-2 flex justify-end">
+        <Link
+          href="/admin/login"
+          className="text-xs text-gray-400 hover:text-[var(--primary-blue)] transition-colors"
+        >
+          สำหรับผู้ดูแลระบบ
+        </Link>
+      </div>
       <form
         onSubmit={execSetup ? finishExecutivePassword : handleSubmit}
         className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8"
@@ -212,10 +220,6 @@ export default function LoginPage() {
             หากท่านยังไม่มีบัญชี?{" "}
             <Link href="/register/consent" className="text-[var(--accent-red)] font-semibold">
               ลงทะเบียน
-            </Link>
-            <span className="mx-2">·</span>
-            <Link href="/admin/login" className="text-[var(--primary-blue)] font-semibold">
-              สำหรับผู้ดูแลระบบ
             </Link>
           </span>
         </p>

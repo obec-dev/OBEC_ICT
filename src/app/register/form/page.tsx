@@ -482,7 +482,7 @@ export default function RegisterFormPage() {
                 <input
                   className={inputClass}
                   value={code}
-                  placeholder="เช่น 1081010005"
+                  placeholder="กรุณาระบุหมายเลขโรงเรียน 10 หลัก"
                   disabled={lookingUp || submitting}
                   onChange={(e) => {
                     setCode(e.target.value);

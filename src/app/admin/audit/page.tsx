@@ -14,6 +14,7 @@ import {
   type AuditPurgeHistoryRow,
 } from "@/lib/supabase/admin";
 import { inputClass } from "@/lib/styles";
+import { formatDateTimeTh } from "@/lib/siteSettings";
 
 function downloadJson(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
@@ -23,6 +24,28 @@ function downloadJson(filename: string, data: unknown) {
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Prefer server Bangkok label; fall back to client Asia/Bangkok format. */
+function formatAuditTime(value: string | null | undefined): string {
+  if (!value) return "-";
+  if (/GMT\+7|Asia\/Bangkok/i.test(value)) return value;
+  return formatDateTimeTh(value) || value;
+}
+
+function bangkokStampForFilename(d = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")}-${get("hour")}${get("minute")}${get("second")}`;
 }
 
 function AuditContent() {
@@ -91,9 +114,10 @@ function AuditContent() {
     setMessage("");
     try {
       const rows = await adminExportAuditLogs(adminToken);
-      const filename = `audit-logs-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+      const filename = `audit-logs-${bangkokStampForFilename()}.json`;
       downloadJson(filename, {
-        exported_at: new Date().toISOString(),
+        exported_at: formatAuditTime(new Date().toISOString()),
+        timezone: "Asia/Bangkok (GMT+7)",
         count: rows.length,
         logs: rows,
       });
@@ -151,6 +175,7 @@ function AuditContent() {
       <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">Audit logs</h1>
       <p className="text-gray-500 mb-6">
         บันทึกการกระทำของผู้ดูแล — ส่งออกเป็นไฟล์ภายนอกได้ และล้างตารางเมื่อเต็ม (คงประวัติการล้างไว้)
+        <span className="block text-xs mt-1 text-gray-400">เวลาแสดงเป็น Asia/Bangkok (GMT+7)</span>
       </p>
 
       {stats && (
@@ -160,11 +185,11 @@ function AuditContent() {
             <div className="text-xs text-gray-500 mt-1">รายการในฐานข้อมูล</div>
           </div>
           <div className="rounded-2xl border border-gray-100 bg-white p-4">
-            <div className="text-sm font-bold text-gray-800 break-all">{stats.oldest_at ?? "-"}</div>
+            <div className="text-sm font-bold text-gray-800 break-all">{formatAuditTime(stats.oldest_at)}</div>
             <div className="text-xs text-gray-500 mt-1">เก่าสุด</div>
           </div>
           <div className="rounded-2xl border border-gray-100 bg-white p-4">
-            <div className="text-sm font-bold text-gray-800 break-all">{stats.newest_at ?? "-"}</div>
+            <div className="text-sm font-bold text-gray-800 break-all">{formatAuditTime(stats.newest_at)}</div>
             <div className="text-xs text-gray-500 mt-1">ใหม่สุด</div>
           </div>
           <div className="rounded-2xl border border-gray-100 bg-white p-4">
@@ -229,7 +254,7 @@ function AuditContent() {
               <tbody>
                 {logs.map((log) => (
                   <tr key={log.log_id} className="border-t border-gray-100 align-top">
-                    <td className="px-3 py-3 text-xs whitespace-nowrap">{log.created_at}</td>
+                    <td className="px-3 py-3 text-xs whitespace-nowrap">{formatAuditTime(log.created_at)}</td>
                     <td className="px-3 py-3">{log.admin_username ?? "-"}</td>
                     <td className="px-3 py-3 font-semibold">{log.action}</td>
                     <td className="px-3 py-3">{log.target_table}</td>
@@ -273,7 +298,7 @@ function AuditContent() {
               <tbody>
                 {history.map((h) => (
                   <tr key={h.purge_id} className="border-t border-gray-100">
-                    <td className="px-3 py-3 text-xs whitespace-nowrap">{h.created_at}</td>
+                    <td className="px-3 py-3 text-xs whitespace-nowrap">{formatAuditTime(h.created_at)}</td>
                     <td className="px-3 py-3">{h.admin_username ?? "-"}</td>
                     <td className="px-3 py-3 font-bold">{h.purged_count}</td>
                     <td className="px-3 py-3 font-mono text-xs break-all">{h.export_filename ?? "-"}</td>

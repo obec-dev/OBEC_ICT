@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useMemo } from "react";
 import { accessRoleFromSession } from "@/lib/auth/access";
@@ -7,9 +8,11 @@ import { candidateCanAccessMissions } from "@/lib/examAccess";
 import { useIctStore } from "@/contexts/IctStore";
 import { SessionMenu } from "./SessionMenu";
 import { ThemeToggle } from "./ThemeToggle";
+import { useTheme } from "./ThemeProvider";
 
 export function Nav() {
   const { session, isAdmin, examProgress, projects } = useIctStore();
+  const { theme } = useTheme();
   const isLoggedIn = Boolean(session);
   const accessRole = accessRoleFromSession(session);
   const isCandidate = accessRole === "user" || accessRole === "school_admin";
@@ -18,16 +21,23 @@ export function Nav() {
     [session, examProgress, projects]
   );
   const showLearnExam = isCandidate && !showMissions;
+  const logoSrc = theme === "dark" ? "/OBEC_ICT_Darkmode.png" : "/OBEC_ICT_small.png";
 
   return (
     <nav className="sticky top-0 z-50 w-full bg-white dark:bg-slate-950 opacity-100 shadow-md transition-all duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-20">
           <div className="flex items-center gap-8">
-            <Link href="/" className="flex items-center group">
-              <span className="text-xl md:text-2xl font-extrabold text-[var(--primary-blue)] tracking-tight">
-                ICT <span className="text-[var(--accent-red)]">Representative</span>
-              </span>
+            <Link href="/" className="flex items-center group shrink-0" aria-label="ICT Representative">
+              <Image
+                key={logoSrc}
+                src={logoSrc}
+                alt="ICT Representative"
+                width={220}
+                height={48}
+                className="h-10 md:h-12 w-auto object-contain"
+                priority
+              />
             </Link>
 
             <div className="hidden md:flex space-x-7 border-l-2 border-gray-100 dark:border-slate-700 pl-8 items-center">

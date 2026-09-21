@@ -212,7 +212,7 @@ function DashboardContent() {
             ไม่พบเขตพื้นที่ตามเงื่อนไขที่เลือก
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {filteredStats.map((stat) => {
               const isOpen = expandedId === stat.district_id;
               return (
@@ -227,11 +227,11 @@ function DashboardContent() {
                   {isOpen && (
                     <div className="col-span-2 md:col-span-4">
                       {expandLoading ? (
-                        <div className="mt-1 rounded-2xl border border-gray-100 bg-white p-6 text-center text-sm text-gray-500">
+                        <div className="mt-1 rounded-xl border border-gray-100 bg-white px-4 py-3 text-center text-sm text-gray-500">
                           กำลังโหลดรายชื่อโรงเรียนในเขตนี้...
                         </div>
                       ) : expandError ? (
-                        <div className="mt-1 rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">
+                        <div className="mt-1 rounded-xl border border-red-100 bg-red-50 px-3 py-2.5 text-sm text-red-700">
                           {expandError}
                         </div>
                       ) : (
