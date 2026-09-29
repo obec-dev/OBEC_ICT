@@ -99,6 +99,8 @@ export type Candidate = {
   must_set_password?: boolean;
   ict_talent_cohort?: string;
   ict_survey?: Record<string, unknown>;
+  /** ชื่อ-นามสกุล ผู้บังคับบัญชา/ผู้อนุมัติ (from registration) */
+  approver?: string | null;
   created_at: string;
 };
 

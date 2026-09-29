@@ -155,6 +155,9 @@ export default function RegisterFormPage() {
   const [persons, setPersons] = useState<PersonDraft[]>([emptyPerson()]);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [periodLoading, setPeriodLoading] = useState(true);
+  const [approverConfirmed, setApproverConfirmed] = useState(false);
+  const [approverPosition, setApproverPosition] = useState("");
+  const [approverName, setApproverName] = useState("");
   const personsRef = useRef(persons);
   personsRef.current = persons;
 
@@ -178,6 +181,9 @@ export default function RegisterFormPage() {
     setFormError("");
     setFieldErrors({});
     setPersons([emptyPerson()]);
+    setApproverConfirmed(false);
+    setApproverPosition("");
+    setApproverName("");
   };
 
   const lookupSchoolHandler = async () => {
@@ -359,9 +365,26 @@ export default function RegisterFormPage() {
     }
     setFieldErrors({});
 
+    if (!approverConfirmed) {
+      setFormError("กรุณายืนยันว่าได้รับการอนุมัติจากผู้บังคับบัญชา");
+      window.setTimeout(() => scrollToInvalidField("approver-confirm"), 0);
+      return;
+    }
+    if (!approverPosition.trim()) {
+      setFormError("กรุณาระบุตำแหน่งผู้บังคับบัญชา/ผู้อนุมัติ");
+      window.setTimeout(() => scrollToInvalidField("approver-position"), 0);
+      return;
+    }
+    if (!approverName.trim()) {
+      setFormError("กรุณาระบุชื่อ-นามสกุล ผู้บังคับบัญชา/ผู้อนุมัติ");
+      window.setTimeout(() => scrollToInvalidField("approver-name"), 0);
+      return;
+    }
+
     setSubmitting(true);
     const failures: string[] = [];
     let successCount = 0;
+    const batchApprover = approverName.trim();
 
     for (let i = 0; i < persons.length; i++) {
       const p = persons[i];
@@ -398,6 +421,7 @@ export default function RegisterFormPage() {
         is_school_admin: p.is_school_admin === true,
         ict_talent_cohort: p.ict_talent_cohort,
         ict_survey: p.ict_survey,
+        approver: batchApprover,
         project_id: siteProject.id,
       });
       if (!result.ok) {
@@ -1123,6 +1147,68 @@ export default function RegisterFormPage() {
               + เพิ่มผู้สมัครในโรงเรียนนี้
             </button>
 
+            <div
+              data-field="approver-confirm"
+              className="rounded-2xl border border-amber-200 bg-amber-50/80 p-5 space-y-4"
+            >
+              <h3 className="text-base font-extrabold text-[var(--primary-blue)]">
+                ความยินยอมจากผู้บริหาร
+              </h3>
+              <p className="text-xs text-gray-600">
+                
+              </p>
+              <label className="flex items-start gap-3 cursor-pointer text-sm text-gray-800">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 accent-[var(--primary-blue)]"
+                  checked={approverConfirmed}
+                  disabled={submitting}
+                  onChange={(e) => setApproverConfirmed(e.target.checked)}
+                />
+                <span>
+                  ยินยอมให้ผู้สมัครข้างต้นเป็นตัวแทน ICT Talent
+                  <span className="text-[var(--accent-red)]"> *</span>
+                </span>
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="approver-position"
+                    className="block text-sm font-semibold text-[var(--primary-blue)] mb-1.5"
+                  >
+                    ตำแหน่งผู้บังคับบัญชา/ผู้อนุมัติ <span className="text-[var(--accent-red)]">*</span>
+                  </label>
+                  <input
+                    id="approver-position"
+                    data-field="approver-position"
+                    className={inputClass}
+                    value={approverPosition}
+                    disabled={submitting}
+                    onChange={(e) => setApproverPosition(e.target.value)}
+                    placeholder="เช่น ผู้อำนวยการโรงเรียน"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="approver-name"
+                    className="block text-sm font-semibold text-[var(--primary-blue)] mb-1.5"
+                  >
+                    ชื่อ-นามสกุล ผู้บังคับบัญชา/ผู้อนุมัติ{" "}
+                    <span className="text-[var(--accent-red)]">*</span>
+                  </label>
+                  <input
+                    id="approver-name"
+                    data-field="approver-name"
+                    className={inputClass}
+                    value={approverName}
+                    disabled={submitting}
+                    onChange={(e) => setApproverName(e.target.value)}
+                    placeholder="ชื่อ-นามสกุล"
+                  />
+                </div>
+              </div>
+            </div>
+
             {formError && (
               <p className="text-sm text-[var(--accent-red)] whitespace-pre-line rounded-xl bg-red-50 border border-red-100 px-4 py-3">
                 {formError}
@@ -1131,7 +1217,13 @@ export default function RegisterFormPage() {
 
             <button
               type="submit"
-              disabled={submitting || lookingUp}
+              disabled={
+                submitting ||
+                lookingUp ||
+                !approverConfirmed ||
+                !approverPosition.trim() ||
+                !approverName.trim()
+              }
               className="w-full rounded-full bg-[var(--accent-red)] text-white py-3.5 font-bold disabled:opacity-40 hover:-translate-y-0.5 transition-all"
             >
               {submitting

@@ -193,3 +193,69 @@ export const SMS_USAGE_OPTIONS = [
   "รู้จักระบบแต่ยังไม่เคยใช้งาน",
   "ไม่เคยใช้งาน/ไม่รู้จักระบบ",
 ] as const;
+
+/** Stable CSV keys + Thai headers for flattened ict_survey export. */
+export const ICT_SURVEY_CSV_COLUMNS: {
+  key: `survey_${IctSurveyDomainKey}`;
+  surveyKey: IctSurveyDomainKey;
+  label: string;
+}[] = [
+  {
+    key: "survey_domain1_planning",
+    surveyKey: "domain1_planning",
+    label: "แบบสำรวจ ICT — ด้านที่ 1 การวางแผนพัฒนาด้าน ICT",
+  },
+  {
+    key: "survey_domain2_teacher_dev",
+    surveyKey: "domain2_teacher_dev",
+    label: "แบบสำรวจ ICT — ด้านที่ 2 การพัฒนาครูและบุคลากรด้าน ICT",
+  },
+  {
+    key: "survey_domain3_student_skills",
+    surveyKey: "domain3_student_skills",
+    label: "แบบสำรวจ ICT — ด้านที่ 3 การพัฒนาทักษะดิจิทัลของนักเรียน",
+  },
+  {
+    key: "survey_domain4_infra",
+    surveyKey: "domain4_infra",
+    label: "แบบสำรวจ ICT — ด้านที่ 4 การดูแลระบบและอุปกรณ์ ICT",
+  },
+  {
+    key: "survey_domain5_coordination",
+    surveyKey: "domain5_coordination",
+    label: "แบบสำรวจ ICT — ด้านที่ 5 การประสานงานด้านเทคโนโลยี",
+  },
+  {
+    key: "survey_domain6_monitoring",
+    surveyKey: "domain6_monitoring",
+    label: "แบบสำรวจ ICT — ด้านที่ 6 การติดตาม ประเมิน และรายงานผล",
+  },
+  {
+    key: "survey_sms_usage",
+    surveyKey: "sms_usage",
+    label: "แบบสำรวจ ICT — การใช้งานระบบ SMS",
+  },
+];
+
+/** Join multi-select survey answers into a single CSV cell. */
+export function formatSurveyAnswers(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v ?? "").trim()).filter(Boolean).join("; ");
+  }
+  if (typeof value === "string") return value.trim();
+  if (value == null) return "";
+  return String(value);
+}
+
+/** Flatten ict_survey JSON into survey_* columns (client-side fallback). */
+export function flattenIctSurveyForCsv(survey: unknown): Record<string, string> {
+  const obj =
+    survey && typeof survey === "object" && !Array.isArray(survey)
+      ? (survey as Record<string, unknown>)
+      : {};
+  const out: Record<string, string> = {};
+  for (const col of ICT_SURVEY_CSV_COLUMNS) {
+    out[col.key] = formatSurveyAnswers(obj[col.surveyKey]);
+  }
+  return out;
+}

@@ -772,6 +772,26 @@ export async function adminExportHierarchyRpc(token: string, mode: "district" | 
   return data.map((item) => asObj(item));
 }
 
+export async function adminExportParticipantsFullRpc(token: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_export_participants_full", {
+    p_token: token,
+  });
+  if (error) throw adminRpcFail(error);
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => asObj(item));
+}
+
+export async function adminExportRegistrationDetailsRpc(token: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_export_registration_details", {
+    p_token: token,
+  });
+  if (error) throw adminRpcFail(error);
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => asObj(item));
+}
+
 export async function adminMissionProgressStats(token: string) {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_mission_progress_stats", { p_token: token });

@@ -105,6 +105,8 @@ type RegisterInput = {
   is_school_admin?: boolean;
   ict_talent_cohort?: string;
   ict_survey?: Record<string, unknown>;
+  /** ชื่อ-นามสกุล ผู้บังคับบัญชา/ผู้อนุมัติ (same for batch) */
+  approver?: string;
   /** Subject whose reg checkbox/window must be open */
   project_id?: string;
 };
@@ -613,6 +615,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           is_school_admin: input.is_school_admin,
           ict_talent_cohort: input.ict_talent_cohort,
           ict_survey: input.ict_survey,
+          approver: input.approver,
         });
 
         setCandidates((prev) => [candidate, ...prev.filter((c) => c.id !== candidate.id)]);

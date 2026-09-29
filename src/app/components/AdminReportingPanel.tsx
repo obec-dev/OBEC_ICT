@@ -5,9 +5,15 @@ import { useIctStore } from "@/contexts/IctStore";
 import {
   adminExportExamResponsesRpc,
   adminExportHierarchyRpc,
+  adminExportParticipantsFullRpc,
+  adminExportRegistrationDetailsRpc,
 } from "@/lib/supabase/admin";
 import { DEFAULT_PROJECT_ID } from "@/data/mockProjects";
 import { mapAnswersByQuestionCode, reportPassLabel, reportQuestionHeader } from "@/lib/examReports";
+import {
+  flattenIctSurveyForCsv,
+  ICT_SURVEY_CSV_COLUMNS,
+} from "@/lib/registrationOptions";
 import { getSiteProject } from "@/lib/siteSettings";
 import type { ProjectQuestion } from "@/types/ict";
 
@@ -301,13 +307,176 @@ export function AnalyticsReportsPanel() {
     }
   };
 
+  const exportParticipantsFull = async () => {
+    if (!adminToken) return;
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const rows = await adminExportParticipantsFullRpc(adminToken);
+      const headers = [
+        "หมายเลขสมาชิก",
+        "ชื่อ-นามสกุล",
+        "อีเมล",
+        "เบอร์โทร",
+        "บทบาท",
+        "รหัสโรงเรียน",
+        "ชื่อโรงเรียน",
+        "จังหวัด",
+        "รหัสเขต",
+        "ชื่อเขต",
+        "เครือข่าย/เขตควบคุม",
+        "สถานะข้อสอบ",
+        "ความคืบหน้าโดยรวม",
+        "เรียนจบ",
+        "วันส่งข้อสอบ",
+        "วันตรวจข้อสอบ",
+        "วันลงทะเบียน",
+      ];
+      const keys = [
+        "member_id",
+        "full_name",
+        "email",
+        "phone",
+        "role",
+        "school_id",
+        "school_name",
+        "province",
+        "district_id",
+        "district_name",
+        "zone_partner",
+        "exam_status",
+        "overall_progress",
+        "learn_completed",
+        "exam_submitted_at",
+        "exam_graded_at",
+        "registered_at",
+      ];
+      const body = rows.map((r) => keys.map((h) => csvEscape(String(r[h] ?? ""))).join(","));
+      const timestamp = new Date().toISOString().slice(0, 10);
+      downloadTextFile(
+        "\uFEFF" + [headers.join(","), ...body].join("\n"),
+        `participants_full_${timestamp}.csv`,
+        "text/csv;charset=utf-8;"
+      );
+      show(`ส่งออกข้อมูลผู้เข้าร่วมโครงการทั้งหมดสำเร็จ (${rows.length} แถว)`);
+    } catch (err) {
+      show(err instanceof Error ? err.message : "ส่งออกไม่สำเร็จ", true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportRegistrationDetails = async () => {
+    if (!adminToken) return;
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const rows = await adminExportRegistrationDetailsRpc(adminToken);
+      const surveyKeys = ICT_SURVEY_CSV_COLUMNS.map((c) => c.key);
+      const surveyLabels = ICT_SURVEY_CSV_COLUMNS.map((c) => c.label);
+      const headers = [
+        "หมายเลขสมาชิก",
+        "title_key",
+        "คำนำหน้า (TH)",
+        "คำนำหน้า (EN)",
+        "คำนำหน้าอื่นๆ (TH)",
+        "คำนำหน้าอื่นๆ (EN)",
+        "ชื่อ",
+        "นามสกุล",
+        "ชื่อ (EN)",
+        "นามสกุล (EN)",
+        "เพศ",
+        "วันเกิด",
+        "เบอร์โทร",
+        "Line ID",
+        "อีเมลติดต่อ",
+        "อีเมลเข้าสู่ระบบ",
+        "ตำแหน่ง",
+        "ตำแหน่งอื่นๆ",
+        "หน้าที่",
+        "รุ่น ICT Talent",
+        ...surveyLabels,
+        "บทบาท",
+        "ผู้จัดการข้อมูลสถานศึกษา",
+        "ชื่อผู้บังคับบัญชา/ผู้อนุมัติ",
+        "รหัสโรงเรียน",
+        "ชื่อโรงเรียน",
+        "จังหวัด",
+        "รหัสเขต",
+        "ชื่อเขต",
+        "พันธมิตร",
+        "โรงเรียนลงทะเบียนแล้ว",
+        "วันลงทะเบียน",
+      ];
+      const baseKeys = [
+        "member_id",
+        "title_key",
+        "title_th",
+        "title_en",
+        "title_other_th",
+        "title_other_en",
+        "first_name",
+        "last_name",
+        "eng_first_name",
+        "eng_last_name",
+        "gender",
+        "birth_date",
+        "phone",
+        "line_id",
+        "contact_email",
+        "login_email",
+        "position",
+        "position_other",
+        "duty",
+        "ict_talent_cohort",
+      ];
+      const tailKeys = [
+        "portal_role",
+        "is_school_admin",
+        "approver",
+        "school_id",
+        "school_name",
+        "province",
+        "district_id",
+        "district_name",
+        "partner",
+        "school_is_registered",
+        "registered_at",
+      ];
+      const body = rows.map((r) => {
+        const flat = flattenIctSurveyForCsv(r.ict_survey);
+        const surveyValues = surveyKeys.map((k) =>
+          csvEscape(String(r[k] ?? flat[k] ?? ""))
+        );
+        return [
+          ...baseKeys.map((h) => csvEscape(String(r[h] ?? ""))),
+          ...surveyValues,
+          ...tailKeys.map((h) => csvEscape(String(r[h] ?? ""))),
+        ].join(",");
+      });
+      const timestamp = new Date().toISOString().slice(0, 10);
+      downloadTextFile(
+        "\uFEFF" + [headers.join(","), ...body].join("\n"),
+        `registration_details_${timestamp}.csv`,
+        "text/csv;charset=utf-8;"
+      );
+      show(`ส่งออกข้อมูลการลงทะเบียนสำเร็จ (${rows.length} แถว)`);
+    } catch (err) {
+      show(err instanceof Error ? err.message : "ส่งออกไม่สำเร็จ", true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="mt-10 rounded-2xl border border-gray-100 dark:border-slate-700 bg-white dark:bg-black p-5">
       <h2 className="text-xl font-extrabold text-[var(--primary-blue)] dark:text-white mb-1">
         รายงานและวิเคราะห์ข้อมูล
       </h2>
       <p className="text-xs text-gray-500 dark:text-white/70 mb-4">
-        ดาวน์โหลดรายงานสรุประดับเขตพื้นที่และเครือข่ายพันธมิตร
+        ดาวน์โหลดรายงานสรุประดับเขตพื้นที่ เครือข่ายพันธมิตร และข้อมูลผู้เข้าร่วม/การลงทะเบียน
       </p>
       <div className="flex flex-wrap gap-2">
         <button
@@ -325,6 +494,22 @@ export function AnalyticsReportsPanel() {
           className="px-4 py-2.5 rounded-lg border border-slate-400 bg-slate-100 text-slate-900 font-bold text-xs disabled:opacity-40"
         >
           รายงานสรุปเครือข่ายพันธมิตร (CSV)
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void exportParticipantsFull()}
+          className="px-4 py-2.5 rounded-lg border border-blue-300 bg-blue-50 text-blue-900 font-bold text-xs disabled:opacity-40"
+        >
+          ดาวน์โหลดข้อมูลผู้เข้าร่วมโครงการทั้งหมด (Full Participant Data)
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void exportRegistrationDetails()}
+          className="px-4 py-2.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-900 font-bold text-xs disabled:opacity-40"
+        >
+          ดาวน์โหลดข้อมูลการลงทะเบียน (Registration Details)
         </button>
       </div>
       <StatusLine error={error} status={status} />

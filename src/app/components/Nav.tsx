@@ -8,11 +8,11 @@ import { candidateCanAccessMissions } from "@/lib/examAccess";
 import { useIctStore } from "@/contexts/IctStore";
 import { SessionMenu } from "./SessionMenu";
 import { ThemeToggle } from "./ThemeToggle";
-import { useTheme } from "./ThemeProvider";
+
+const BRAND_LOGO = "/OBEC_ICT_Logo.jpg";
 
 export function Nav() {
   const { session, isAdmin, examProgress, projects } = useIctStore();
-  const { theme } = useTheme();
   const isLoggedIn = Boolean(session);
   const accessRole = accessRoleFromSession(session);
   const isCandidate = accessRole === "user" || accessRole === "school_admin";
@@ -21,7 +21,6 @@ export function Nav() {
     [session, examProgress, projects]
   );
   const showLearnExam = isCandidate && !showMissions;
-  const logoSrc = theme === "dark" ? "/OBEC_ICT_Darkmode.png" : "/OBEC_ICT_small.png";
 
   return (
     <nav className="sticky top-0 z-50 w-full bg-white dark:bg-slate-950 opacity-100 shadow-md transition-all duration-300">
@@ -30,8 +29,7 @@ export function Nav() {
           <div className="flex items-center gap-8">
             <Link href="/" className="flex items-center group shrink-0" aria-label="ICT Representative">
               <Image
-                key={logoSrc}
-                src={logoSrc}
+                src={BRAND_LOGO}
                 alt="ICT Representative"
                 width={220}
                 height={48}
