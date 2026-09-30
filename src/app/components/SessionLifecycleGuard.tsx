@@ -19,7 +19,6 @@ const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
   "scroll",
   "touchstart",
   "click",
-  "visibilitychange",
 ];
 
 /**
@@ -69,6 +68,7 @@ export function SessionLifecycleGuard() {
     for (const evt of ACTIVITY_EVENTS) {
       window.addEventListener(evt, onActivity, { passive: true });
     }
+    document.addEventListener("visibilitychange", onActivity);
 
     const onPageHide = (event: PageTransitionEvent) => {
       // Keep sessionStorage for refresh / bfcache; only drop legacy localStorage auth.
@@ -87,6 +87,7 @@ export function SessionLifecycleGuard() {
       for (const evt of ACTIVITY_EVENTS) {
         window.removeEventListener(evt, onActivity);
       }
+      document.removeEventListener("visibilitychange", onActivity);
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
