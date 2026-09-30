@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useIctStore } from "@/contexts/IctStore";
+import { sessionExpireMessage } from "@/lib/auth/sessionLifecycle";
 import { inputClass } from "@/lib/styles";
 
 export default function AdminLoginPage() {
@@ -21,6 +22,12 @@ export default function AdminLoginPage() {
       router.replace(session.admin.must_change_password ? "/admin/change-password" : "/admin");
     }
   }, [hydrated, router, session]);
+
+  useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    const msg = sessionExpireMessage(reason);
+    if (msg) setError(msg);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

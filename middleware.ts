@@ -9,6 +9,14 @@ import {
   type AccessRole,
 } from "@/lib/auth/access";
 
+/** Force Supabase auth cookies to be browser session cookies (no Max-Age / Expires). */
+function asSessionCookieOptions(options?: Record<string, unknown>) {
+  const next = { ...(options || {}) } as Record<string, unknown>;
+  delete next.maxAge;
+  delete next.expires;
+  return next;
+}
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -28,7 +36,7 @@ export async function middleware(request: NextRequest) {
             request,
           });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            supabaseResponse.cookies.set(name, value, asSessionCookieOptions(options))
           );
         },
       },

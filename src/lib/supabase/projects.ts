@@ -102,9 +102,8 @@ function stripKeys(questions: ProjectQuestion[]): PublicExamQuestion[] {
 export async function fetchPublicExamQuestions(projectId?: string): Promise<PublicExamQuestion[]> {
   try {
     const supabase = createClient();
-    const baseColumns =
-      "id, project_id, prompt, type, options, image_url, points, order_index, answer_required";
-    const sectionColumns = `${baseColumns}, section_id, section_title, section_description, section_order`;
+    const sectionColumns =
+      "id, project_id, prompt, type, options, image_url, points, order_index, answer_required, section_id, section_title, section_description, section_order";
     let query = supabase
       .from("public_project_questions")
       .select(sectionColumns)
@@ -112,27 +111,15 @@ export async function fetchPublicExamQuestions(projectId?: string): Promise<Publ
     if (projectId) {
       query = query.eq("project_id", projectId);
     }
-    let data: PublicExamQuestion[] | null = null;
-    const { data: primaryData, error: primaryError } = await query;
-    let error = primaryError;
-    data = (primaryData as PublicExamQuestion[] | null) ?? null;
-    if (error) {
-      let fallback = supabase
-        .from("public_project_questions")
-        .select(baseColumns)
-        .order("order_index", { ascending: true });
-      if (projectId) fallback = fallback.eq("project_id", projectId);
-      const retry = await fallback;
-      data = (retry.data as PublicExamQuestion[] | null) ?? null;
-      error = retry.error;
-    }
+    const { data, error } = await query;
     if (error || !data) {
+      console.warn("fetchPublicExamQuestions section select failed:", error?.message);
       const mocks = projectId
         ? MOCK_QUESTIONS.filter((q) => q.project_id === projectId)
         : MOCK_QUESTIONS;
       return stripKeys(mocks);
     }
-    return data;
+    return data as PublicExamQuestion[];
   } catch {
     const mocks = projectId
       ? MOCK_QUESTIONS.filter((q) => q.project_id === projectId)
@@ -219,6 +206,7 @@ export async function upsertProjectVideo(token: string, video: ProjectVideo): Pr
       video_id: video.video_id,
       is_mandatory: video.is_mandatory,
       order_index: video.order_index ?? 0,
+      exam_section_id: video.exam_section_id || null,
     },
   });
   if (error) {

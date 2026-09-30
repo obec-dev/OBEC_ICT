@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useIctStore } from "@/contexts/IctStore";
 import { sortProjectVideos } from "@/lib/lessonExamMap";
 import { inputClass } from "@/lib/styles";
@@ -9,7 +9,7 @@ import {
   deleteExamSectionDb,
   upsertExamSection,
 } from "@/lib/supabase/projects";
-import type { ExamSection } from "@/types/ict";
+import type { ExamSection, ProjectVideo } from "@/types/ict";
 
 type Props = {
   projectId: string;
@@ -26,7 +26,10 @@ export function ExamSectionManager({ projectId, onChange }: Props) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const projectVideos = sortProjectVideos(videos.filter((video) => video.project_id === projectId));
+  const projectVideos = useMemo(
+    () => sortProjectVideos(videos.filter((video) => video.project_id === projectId)),
+    [videos, projectId]
+  );
 
   const publish = (next: ExamSection[]) => {
     const ordered = [...next].sort((a, b) => a.section_order - b.section_order);
@@ -98,13 +101,18 @@ export function ExamSectionManager({ projectId, onChange }: Props) {
     next.splice(target, 0, item);
     const reordered = next.map((section, order) => ({ ...section, section_order: order + 1 }));
 
-    // Keep video↔lesson pairs glued: apply the same permutation to video order_index.
+    // Keep video↔lesson pairs glued: apply the same permutation to video order_index
+    // and re-bind exam_section_id to the section at the same index.
     const nextVideos = [...projectVideos];
     if (index < nextVideos.length && target < nextVideos.length) {
       const [videoItem] = nextVideos.splice(index, 1);
       nextVideos.splice(target, 0, videoItem);
     }
-    const reorderedVideos = nextVideos.map((video, order) => ({ ...video, order_index: order + 1 }));
+    const reorderedVideos = nextVideos.map((video, order) => ({
+      ...video,
+      order_index: order + 1,
+      exam_section_id: reordered[order]?.id ?? video.exam_section_id ?? null,
+    }));
 
     setBusy(true);
     setError("");
@@ -129,6 +137,11 @@ export function ExamSectionManager({ projectId, onChange }: Props) {
     setError("");
     try {
       await deleteExamSectionDb(token, section.id);
+      // Clear video mappings that pointed at this section
+      for (const video of projectVideos.filter((v) => v.exam_section_id === section.id)) {
+        const res = await saveProjectVideo({ ...video, exam_section_id: null });
+        if (!res.ok) throw new Error(res.error);
+      }
       publish(sections.filter((item) => item.id !== section.id));
       if (editingId === section.id) resetForm();
     } catch (err) {
@@ -138,12 +151,63 @@ export function ExamSectionManager({ projectId, onChange }: Props) {
     }
   };
 
+  const mapVideoToSection = async (video: ProjectVideo, sectionId: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await saveProjectVideo({
+        ...video,
+        exam_section_id: sectionId || null,
+      });
+      if (!res.ok) throw new Error(res.error);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ผูกวิดีโอกับแบบทดสอบไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const autoMapByOrder = async () => {
+    if (!token || sections.length === 0) return;
+    setBusy(true);
+    setError("");
+    try {
+      for (let i = 0; i < projectVideos.length; i++) {
+        const section = sections[i];
+        if (!section) continue;
+        const video = projectVideos[i];
+        const res = await saveProjectVideo({
+          ...video,
+          order_index: i + 1,
+          exam_section_id: section.id,
+        });
+        if (!res.ok) throw new Error(res.error);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "แมปอัตโนมัติไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="mb-8 rounded-2xl border border-blue-100 bg-blue-50/40 p-5">
-      <h3 className="text-sm font-extrabold text-[var(--primary-blue)]">บทเรียนที่ ...</h3>
-      <p className="mt-1 text-xs text-gray-500">
-        กำหนดชื่อและลำดับบทเรียน — การเลื่อนลำดับจะซิงก์วิดีโอบทเรียนคู่กันโดยอัตโนมัติ
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-extrabold text-[var(--primary-blue)]">บทเรียน / แบบทดสอบ</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            กำหนดชื่อบทเรียน และผูกวิดีโอ ↔ แบบทดสอบแบบ 1 ต่อ 1 (แนะนำให้ตรงลำดับบทเรียนที่ 1, 2, …)
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={busy || sections.length === 0 || projectVideos.length === 0}
+          onClick={() => void autoMapByOrder()}
+          className="rounded-full border border-[var(--primary-blue)] bg-white px-3 py-1.5 text-xs font-bold text-[var(--primary-blue)] disabled:opacity-40"
+        >
+          แมปวิดีโอตามลำดับอัตโนมัติ
+        </button>
+      </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-[1.2fr_1.4fr_auto]">
         <input
@@ -173,22 +237,49 @@ export function ExamSectionManager({ projectId, onChange }: Props) {
       {sections.length > 0 && (
         <ol className="mt-4 space-y-2">
           {sections.map((section, index) => {
-            const pairedVideo = projectVideos[index];
+            const mappedVideo = projectVideos.find((v) => v.exam_section_id === section.id);
             return (
               <li
                 key={section.id}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white bg-white px-3 py-2"
               >
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold text-gray-800">
                     บทเรียนที่ {index + 1}: {section.title}
                   </p>
                   {section.description && <p className="text-xs text-gray-500">{section.description}</p>}
-                  <p className="text-[11px] text-gray-400 mt-0.5">
-                    {pairedVideo
-                      ? `วิดีโอคู่: ${pairedVideo.title}`
-                      : "ยังไม่มีวิดีโอคู่ในลำดับนี้"}
-                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <label className="text-[11px] font-semibold text-gray-500">วิดีโอ : </label>
+                    <select
+                      className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs max-w-[240px]"
+                      disabled={busy}
+                      value={mappedVideo?.id || ""}
+                      onChange={(e) => {
+                        const videoId = e.target.value;
+                        if (!videoId) {
+                          if (mappedVideo) void mapVideoToSection(mappedVideo, "");
+                          return;
+                        }
+                        const video = projectVideos.find((v) => v.id === videoId);
+                        if (video) void mapVideoToSection(video, section.id);
+                      }}
+                    >
+                      <option value="">— ยังไม่ผูก —</option>
+                      {projectVideos.map((video, vIdx) => (
+                        <option key={video.id} value={video.id}>
+                          วิดีโอที่ {vIdx + 1}: {video.title}
+                          {video.exam_section_id && video.exam_section_id !== section.id
+                            ? " (ผูกกับบทอื่นแล้ว)"
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {!mappedVideo && (
+                      <span className="text-[11px] font-semibold text-amber-700">
+                        ยังไม่ได้บันทึกการผูกจริง — กดแมปอัตโนมัติหรือเลือกวิดีโอ
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex gap-1">
                   <button

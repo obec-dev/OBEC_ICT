@@ -3,6 +3,7 @@ import { Prompt } from "next/font/google";
 import "./globals.css";
 import { Nav } from "./components/Nav";
 import { PassCelebrationModal } from "./components/PassCelebrationModal";
+import { SessionLifecycleGuard } from "./components/SessionLifecycleGuard";
 import { SessionTimeoutGuard } from "./components/SessionTimeoutGuard";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { IctStoreProvider } from "@/contexts/IctStore";
@@ -52,6 +53,7 @@ export default function RootLayout({
       <body className={`${prompt.className} antialiased bg-[var(--background)] text-[var(--foreground)]`}>
         <ThemeProvider>
           <IctStoreProvider>
+            <SessionLifecycleGuard />
             <SessionTimeoutGuard />
       <div className="fixed inset-0 z-[-1] pointer-events-none overflow-hidden bg-[var(--background)]">
               <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-[var(--primary-solid)] opacity-[0.04] dark:opacity-[0.08] blur-3xl"></div>

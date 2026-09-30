@@ -6,6 +6,7 @@ import {
   accessRoleFromSession,
   canAccessPath,
   homePathForSession,
+  syncAccessRoleCookie,
 } from "@/lib/auth/access";
 import { useIctStore } from "@/contexts/IctStore";
 import type { AdminRole, PortalRole } from "@/types/ict";
@@ -68,7 +69,13 @@ export function AuthGuard({
 
     if (!session) {
       if (needsLogin) {
-        router.replace(requireAdmin ? "/admin/login" : "/login");
+        // After tab close, sessionStorage is empty — clear stale role cookie and prompt re-login
+        const hadRoleCookie =
+          typeof document !== "undefined" &&
+          document.cookie.split(";").some((c) => c.trim().startsWith("ict_access_role="));
+        if (hadRoleCookie) syncAccessRoleCookie(null);
+        const loginPath = requireAdmin ? "/admin/login" : "/login";
+        router.replace(hadRoleCookie ? `${loginPath}?reason=closed` : loginPath);
       }
       return;
     }

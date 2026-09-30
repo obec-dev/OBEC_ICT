@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useIctStore } from "@/contexts/IctStore";
+import { sessionExpireMessage } from "@/lib/auth/sessionLifecycle";
 import { clearPasswordSetup } from "@/lib/passwordSetup";
 import { setExecutivePassword } from "@/lib/supabase/data";
 import { writeSession } from "@/lib/storage";
@@ -28,6 +29,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     clearPasswordSetup();
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    const msg = sessionExpireMessage(reason);
+    if (msg) setError(msg);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -86,8 +86,9 @@ export function syncAccessRoleCookie(session: SessionUser | null | undefined) {
     document.cookie = `${ACCESS_ROLE_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
     return;
   }
-  // 7 days — refreshed on each login / hydrate
-  document.cookie = `${ACCESS_ROLE_COOKIE}=${encodeURIComponent(role)}; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+  // Session cookie: no Max-Age / Expires → cleared when the browser fully closes
+  const secure = typeof location !== "undefined" && location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${ACCESS_ROLE_COOKIE}=${encodeURIComponent(role)}; Path=/; SameSite=Lax${secure}`;
 }
 
 export function parseAccessRoleCookie(value: string | undefined | null): AccessRole {

@@ -409,7 +409,7 @@ function LearnContent() {
                 <p className="text-xs text-gray-500 mt-0.5">
                   {activePair.part
                     ? `${activePair.part.title} · ${lessonQuizStatusLabel(quizStatus)}`
-                    : "ยังไม่ได้ผูกแบบทดสอบกับวิดีโอนี้ (เรียงตามลำดับบทเรียนที่ 1, 2, …)"}
+                    : "ยังไม่ได้ผูกแบบทดสอบกับวิดีโอนี้ — ผู้ดูแลควรแมปวิดีโอ ↔ บทเรียนในหน้าจัดการโครงการ"}
                 </p>
               </div>
               {activePair.part ? (

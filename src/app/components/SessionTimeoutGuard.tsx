@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useIctStore } from "@/contexts/IctStore";
+import { loginPathForSession } from "@/lib/auth/sessionLifecycle";
 
 /** Auto-logout after this many ms of no user interaction. */
 const INACTIVITY_MS = 5 * 60 * 1000;
@@ -15,13 +16,14 @@ const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
 ];
 
 /**
- * Ends candidate/admin sessions after 5 minutes of inactivity.
- * Shows a Thai security notice modal; OK redirects to landing (/).
+ * Ends sessions after 5 minutes of inactivity.
+ * Shows a Thai security notice; OK redirects to the matching login page.
  */
 export function SessionTimeoutGuard() {
   const { session, hydrated, logout } = useIctStore();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const expiredSessionRef = useRef(session);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -34,7 +36,8 @@ export function SessionTimeoutGuard() {
     clearTimer();
     if (!session || showModal) return;
     timerRef.current = setTimeout(() => {
-      logout({ redirect: false });
+      expiredSessionRef.current = session;
+      logout({ redirect: false, reason: "inactive" });
       setShowModal(true);
     }, INACTIVITY_MS);
   }, [clearTimer, logout, session, showModal]);
@@ -60,7 +63,8 @@ export function SessionTimeoutGuard() {
 
   const handleOk = () => {
     setShowModal(false);
-    window.location.href = "/";
+    const path = loginPathForSession(expiredSessionRef.current);
+    window.location.href = `${path}?reason=expired`;
   };
 
   if (!showModal) return null;

@@ -35,6 +35,7 @@ import {
   writePersistedState,
   writeSession,
 } from "@/lib/storage";
+import { isSessionIdleExpired } from "@/lib/auth/sessionLifecycle";
 import type {
   AdminUser,
   AuditUser,
@@ -107,6 +108,8 @@ type RegisterInput = {
   ict_survey?: Record<string, unknown>;
   /** ชื่อ-นามสกุล ผู้บังคับบัญชา/ผู้อนุมัติ (same for batch) */
   approver?: string;
+  /** ตำแหน่งผู้บังคับบัญชา/ผู้อนุมัติ (same for batch) */
+  approver_position?: string;
   /** Subject whose reg checkbox/window must be open */
   project_id?: string;
 };
@@ -182,7 +185,7 @@ type IctStoreValue = {
   ) => Promise<{ ok: true; mustChangePassword: boolean } | { ok: false; error: string }>;
   refreshAdminSession: (admin: AdminUser) => void;
   syncExecutiveUser: (user: BusinessUser | AuditUser) => void;
-  logout: (opts?: { redirect?: boolean }) => void;
+  logout: (opts?: { redirect?: boolean; reason?: "expired" | "inactive" | "closed" }) => void;
   saveWatchProgress: (
     partial: Omit<WatchProgress, "candidate_id" | "last_updated">
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -337,7 +340,13 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
     // Exam answers are confidential and must not be restored from the browser cache.
     setExamProgress([]);
     clearStoredExamAnswers();
-    const existing = readSession();
+
+    // Drop idle / closed-tab sessions before hydrating UI
+    let existing = readSession();
+    if (existing && isSessionIdleExpired()) {
+      writeSession(null);
+      existing = null;
+    }
     setSession(existing);
     // Re-sync access-role cookie so middleware can enforce path matrix
     writeSession(existing);
@@ -616,6 +625,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
           ict_talent_cohort: input.ict_talent_cohort,
           ict_survey: input.ict_survey,
           approver: input.approver,
+          approver_position: input.approver_position,
         });
 
         setCandidates((prev) => [candidate, ...prev.filter((c) => c.id !== candidate.id)]);
@@ -741,8 +751,9 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(
-    (opts?: { redirect?: boolean }) => {
+    (opts?: { redirect?: boolean; reason?: "expired" | "inactive" | "closed" }) => {
       const shouldRedirect = opts?.redirect !== false;
+      const wasAdmin = session?.kind === "admin";
       if (session?.kind === "admin") {
         void adminLogoutRpc(session.token);
       }
@@ -752,7 +763,12 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       forgetExamProgress();
       persistSession(null);
       if (shouldRedirect && typeof window !== "undefined") {
-        window.location.href = "/";
+        if (opts?.reason) {
+          const path = wasAdmin ? "/admin/login" : "/login";
+          window.location.href = `${path}?reason=${encodeURIComponent(opts.reason)}`;
+        } else {
+          window.location.href = "/";
+        }
       }
     },
     [forgetExamProgress, persistSession, session]

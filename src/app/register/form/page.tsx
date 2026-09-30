@@ -385,6 +385,7 @@ export default function RegisterFormPage() {
     const failures: string[] = [];
     let successCount = 0;
     const batchApprover = approverName.trim();
+    const batchApproverPosition = approverPosition.trim();
 
     for (let i = 0; i < persons.length; i++) {
       const p = persons[i];
@@ -422,6 +423,7 @@ export default function RegisterFormPage() {
         ict_talent_cohort: p.ict_talent_cohort,
         ict_survey: p.ict_survey,
         approver: batchApprover,
+        approver_position: batchApproverPosition,
         project_id: siteProject.id,
       });
       if (!result.ok) {

@@ -14,9 +14,12 @@ export async function createClient() {
         },
         setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
+            cookiesToSet.forEach(({ name, value, options }) => {
+              const next = { ...(options || {}) } as Record<string, unknown>;
+              delete next.maxAge;
+              delete next.expires;
+              cookieStore.set(name, value, next);
+            });
           } catch {
             // ป้องกัน Error ตอนพยายามเซ็ต Cookie ผิดจังหวะ
           }

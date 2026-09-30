@@ -101,6 +101,8 @@ export type Candidate = {
   ict_survey?: Record<string, unknown>;
   /** ชื่อ-นามสกุล ผู้บังคับบัญชา/ผู้อนุมัติ (from registration) */
   approver?: string | null;
+  /** ตำแหน่งผู้บังคับบัญชา/ผู้อนุมัติ (from registration) */
+  approver_position?: string | null;
   created_at: string;
 };
 
@@ -235,6 +237,8 @@ export type ProjectVideo = {
   video_id: string; // YouTube video ID extracted from url or string
   is_mandatory: boolean; // Flag to indicate if video is mandatory for exam
   order_index?: number;
+  /** Explicit 1:1 link to exam_sections.id (preferred over order pairing) */
+  exam_section_id?: string | null;
   created_at?: string;
 };
 

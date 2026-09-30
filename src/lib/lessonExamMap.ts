@@ -10,18 +10,48 @@ export function sortProjectVideos(videos: ProjectVideo[]): ProjectVideo[] {
   );
 }
 
-/** 1-to-1 by order: Video 1 ↔ Exam Section 1, … */
+/**
+ * Pair each video to an exam part.
+ * Prefer explicit video.exam_section_id; fall back to 1:1 by order index.
+ * If a mapped section has no questions yet, fall back to order so UI still works
+ * only when that order slot has questions.
+ */
 export function pairVideosWithExamParts(
   videos: ProjectVideo[],
   questions: ProjectQuestion[]
 ): { video: ProjectVideo; part: ExamPart | null; lessonIndex: number }[] {
   const sortedVideos = sortProjectVideos(videos);
-  const parts = groupQuestionsBySection(questions);
-  return sortedVideos.map((video, index) => ({
-    video,
-    part: parts[index] ?? null,
-    lessonIndex: index + 1,
-  }));
+  const parts = groupQuestionsBySection(questions).filter((p) => p.questions.length > 0);
+  const partsById = new Map(parts.map((part) => [part.id, part]));
+  const usedPartIds = new Set<string>();
+
+  return sortedVideos.map((video, index) => {
+    let part: ExamPart | null = null;
+    const mappedId = video.exam_section_id?.trim() || "";
+
+    if (mappedId && partsById.has(mappedId)) {
+      part = partsById.get(mappedId) ?? null;
+    }
+
+    if (!part) {
+      // Prefer unused part whose section_order matches lesson index (1-based)
+      const byOrderMeta = parts.find(
+        (p) =>
+          !usedPartIds.has(p.id) &&
+          (p.order === index + 1 || p.order === index)
+      );
+      const byIndex = parts[index] && !usedPartIds.has(parts[index].id) ? parts[index] : null;
+      const free = parts.find((p) => !usedPartIds.has(p.id));
+      part = byOrderMeta ?? byIndex ?? free ?? null;
+    }
+
+    if (part) usedPartIds.add(part.id);
+    return {
+      video,
+      part,
+      lessonIndex: index + 1,
+    };
+  });
 }
 
 export function resolveExamPartFromParams(
@@ -36,11 +66,11 @@ export function resolveExamPartFromParams(
   if (sectionRaw && !/^\d+$/.test(sectionRaw)) {
     const byId = parts.find((part) => part.id === sectionRaw);
     if (byId) {
-      const idx = parts.findIndex((part) => part.id === byId.id);
+      const pairIdx = pairs.findIndex((pair) => pair.part?.id === byId.id);
       return {
         part: byId,
-        video: pairs[idx]?.video ?? null,
-        lessonIndex: idx + 1,
+        video: pairIdx >= 0 ? pairs[pairIdx].video : null,
+        lessonIndex: pairIdx >= 0 ? pairs[pairIdx].lessonIndex : parts.findIndex((p) => p.id === byId.id) + 1,
       };
     }
   }
@@ -51,14 +81,29 @@ export function resolveExamPartFromParams(
     if (hit?.part) {
       return { part: hit.part, video: hit.video, lessonIndex: hit.lessonIndex };
     }
+    // Video found but no part yet — try mapped section id even if questions empty in group
+    const video = sortProjectVideos(videos).find((v) => v.id === videoId || v.video_id === videoId);
+    if (video?.exam_section_id) {
+      const part = parts.find((p) => p.id === video.exam_section_id);
+      if (part) {
+        const lessonIndex =
+          sortProjectVideos(videos).findIndex((v) => v.id === video.id) + 1 || 1;
+        return { part, video, lessonIndex };
+      }
+    }
   }
 
   if (sectionRaw) {
     const asIndex = Number(sectionRaw);
+    if (Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= pairs.length) {
+      const pair = pairs[asIndex - 1];
+      if (pair?.part) {
+        return { part: pair.part, video: pair.video, lessonIndex: asIndex };
+      }
+    }
     if (Number.isFinite(asIndex) && asIndex >= 1 && asIndex <= parts.length) {
       const part = parts[asIndex - 1];
-      const pair = pairs[asIndex - 1];
-      return { part, video: pair?.video ?? null, lessonIndex: asIndex };
+      return { part, video: pairs[asIndex - 1]?.video ?? null, lessonIndex: asIndex };
     }
   }
 

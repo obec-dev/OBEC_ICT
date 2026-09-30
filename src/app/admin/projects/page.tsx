@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnswerKeyCsvImport } from "@/app/components/admin/AnswerKeyCsvImport";
 import { ExamAnswerTree } from "@/app/components/admin/ExamAnswerTree";
 import { ExamQuestionTree } from "@/app/components/admin/ExamQuestionTree";
@@ -26,8 +26,25 @@ import { inputClass } from "@/lib/styles";
 import { numberInputGuards, sumGradedMaxScore } from "@/lib/numberInput";
 import { canonicalMcqValue } from "@/lib/answerKeys";
 import { examQuestionDraftSchema } from "@/lib/schemas/examQuestion";
-import { extractYouTubeId } from "@/lib/supabase/projects";
+import { adminFetchExamSections, extractYouTubeId } from "@/lib/supabase/projects";
 import type { ExamSection, LearningProject, PassThresholdMode, ProjectQuestion, ProjectVideo, QuestionType } from "@/types/ict";
+
+/** Human-readable paired exam label — never show raw section UUID. */
+function pairedExamLabel(sections: ExamSection[], sectionId?: string | null): string {
+  const id = sectionId?.trim() || "";
+  if (!id) return "ยังไม่ผูก — ตั้งค่าที่แท็บแบบทดสอบ";
+  const sorted = [...sections].sort(
+    (a, b) => a.section_order - b.section_order || a.title.localeCompare(b.title, "th")
+  );
+  const idx = sorted.findIndex((s) => s.id === id);
+  if (idx < 0) {
+    return sections.length === 0
+      ? "กำลังโหลดชื่อแบบทดสอบ…"
+      : "แบบทดสอบที่ผูกไว้ (ไม่พบชื่อในรายการ)";
+  }
+  const section = sorted[idx];
+  return `บทเรียนที่ ${idx + 1}: ${section.title}`;
+}
 
 function emptyProjectForm(): LearningProject {
   return {
@@ -83,6 +100,7 @@ function ProjectsManagementContent() {
     video_id: "",
     is_mandatory: false,
     order_index: 0,
+    exam_section_id: null,
   });
 
   // Modal / Form states for Questions (Exam Builder)
@@ -119,6 +137,31 @@ function ProjectsManagementContent() {
   const [gradingResult, setGradingResult] = useState<{ gradedCount: number; passedCount: number; pendingCount: number } | null>(null);
   const [isGrading, setIsGrading] = useState(false);
   const [gradeConfirm, setGradeConfirm] = useState<{ unsubmittedCount: number } | null>(null);
+
+  // Load exam sections for video list labels even when Exam tab is not open
+  useEffect(() => {
+    if (!adminToken || !selectedProjectId) {
+      setExamSections([]);
+      return;
+    }
+    let cancelled = false;
+    void adminFetchExamSections(adminToken, selectedProjectId)
+      .then((rows) => {
+        if (!cancelled) {
+          setExamSections(
+            [...rows].sort(
+              (a, b) => a.section_order - b.section_order || a.title.localeCompare(b.title, "th")
+            )
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setExamSections([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adminToken, selectedProjectId]);
 
   const currentProject = siteProject;
   const projectVideos = videos.filter((v) => v.project_id === selectedProjectId);
@@ -910,6 +953,7 @@ function ProjectsManagementContent() {
                           video_id: "",
                           is_mandatory: false,
                           order_index: projectVideos.length + 1,
+                          exam_section_id: null,
                         });
                         setShowVideoModal(true);
                       }}
@@ -944,6 +988,18 @@ function ProjectsManagementContent() {
                                 )}
                               </div>
                               <p className="text-xs font-mono text-gray-500 mt-1">URL: {vid.video_url}</p>
+                              <p className="text-xs text-gray-600 mt-1">
+                                แบบทดสอบ : {" "}
+                                <span
+                                  className={
+                                    vid.exam_section_id
+                                      ? "font-semibold text-[var(--primary-blue)]"
+                                      : "font-medium text-amber-700"
+                                  }
+                                >
+                                  {pairedExamLabel(examSections, vid.exam_section_id)}
+                                </span>
+                              </p>
                             </div>
                           </div>
 
@@ -1127,6 +1183,21 @@ function ProjectsManagementContent() {
                   onChange={(e) => setVideoForm((prev) => ({ ...prev, video_url: e.target.value }))}
                 />
               </div>
+              {videoForm.exam_section_id ? (
+                <p className="text-xs text-gray-600 rounded-xl border border-blue-100 bg-blue-50/50 px-3 py-2">
+                  แบบทดสอบ : {" "}
+                  <span className="font-semibold text-[var(--primary-blue)]">
+                    {pairedExamLabel(examSections, videoForm.exam_section_id)}
+                  </span>
+                  <span className="block text-[11px] text-gray-500 mt-1">
+                    
+                  </span>
+                </p>
+              ) : (
+                <p className="text-xs text-amber-700 rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-2">
+                  ยังไม่ผูกแบบทดสอบ — ไปตั้งค่าที่แท็บแบบทดสอบ
+                </p>
+              )}
               <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200">
                 <ToggleSwitch
                   id="video-mandatory"

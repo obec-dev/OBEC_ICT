@@ -60,6 +60,7 @@ type ProfileRow = {
   deleted_at?: string | null;
   assigned_district_id?: string | null;
   approver?: string | null;
+  approver_position?: string | null;
 };
 
 function districtName(row: SchoolRow): string {
@@ -135,6 +136,7 @@ export function mapProfileRow(row: ProfileRow): Candidate {
     is_active: row.is_active !== false,
     deleted_at: row.deleted_at ?? null,
     approver: row.approver ?? undefined,
+    approver_position: row.approver_position ?? undefined,
     created_at: row.created_at ?? new Date().toISOString(),
   };
 }
@@ -290,6 +292,7 @@ function mapRpcProfileJson(raw: Record<string, unknown>): Candidate {
     is_active: raw.is_active == null ? true : Boolean(raw.is_active),
     deleted_at: raw.deleted_at == null ? null : String(raw.deleted_at),
     approver: raw.approver == null ? null : String(raw.approver),
+    approver_position: raw.approver_position == null ? null : String(raw.approver_position),
   });
 }
 
@@ -323,6 +326,8 @@ export type RegisterProfileInput = {
   ict_survey?: Record<string, unknown>;
   /** ชื่อ-นามสกุล ผู้บังคับบัญชา/ผู้อนุมัติ */
   approver?: string;
+  /** ตำแหน่งผู้บังคับบัญชา/ผู้อนุมัติ */
+  approver_position?: string;
 };
 
 function asRpcObj(data: unknown): Record<string, unknown> {
@@ -381,6 +386,7 @@ export async function insertProfile(input: RegisterProfileInput): Promise<Candid
     p_ict_talent_cohort: input.ict_talent_cohort || null,
     p_ict_survey: input.ict_survey ?? {},
     p_approver: input.approver?.trim() || null,
+    p_approver_position: input.approver_position?.trim() || null,
   });
   if (error) throw new Error(error.message);
 
