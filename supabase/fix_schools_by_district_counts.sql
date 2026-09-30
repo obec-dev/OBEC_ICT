@@ -1,5 +1,5 @@
 -- Schools by district with registered people count (no PII)
--- Run in Supabase SQL Editor if get_schools_by_district is missing
+-- Active profiles only: deleted_at IS NULL + portal user/school_admin
 
 CREATE OR REPLACE FUNCTION public.get_schools_by_district(p_district_id text)
 RETURNS TABLE (
@@ -22,14 +22,19 @@ AS $$
     s.province,
     s.district_id,
     COALESCE(d.district_name, s.district_id) AS district_name,
-    (
-      COALESCE(s.is_registered, false)
-      OR EXISTS (SELECT 1 FROM public.profiles p WHERE p.school_id = s.school_id)
+    EXISTS (
+      SELECT 1
+      FROM public.profiles p
+      WHERE p.school_id = s.school_id
+        AND p.deleted_at IS NULL
+        AND COALESCE(p.portal_role, 'user') IN ('user', 'school_admin')
     ) AS is_registered,
     (
       SELECT COUNT(*)::bigint
       FROM public.profiles p
       WHERE p.school_id = s.school_id
+        AND p.deleted_at IS NULL
+        AND COALESCE(p.portal_role, 'user') IN ('user', 'school_admin')
     ) AS registered_count
   FROM public.schools s
   LEFT JOIN public.districts d ON d.district_id = s.district_id

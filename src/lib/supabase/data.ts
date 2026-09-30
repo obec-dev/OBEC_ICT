@@ -71,20 +71,24 @@ function districtName(row: SchoolRow): string {
 }
 
 export function mapSchoolRow(row: SchoolRow): School {
+  // Prefer server-side registered_count when present; never treat soft-deleted
+  // profiles as registrants (RPC already filters deleted_at IS NULL).
   const profileList = Array.isArray(row.profiles)
     ? row.profiles
     : row.profiles
       ? [row.profiles]
       : [];
   const registered_count = profileList.length;
-  const hasProfile = registered_count > 0;
+  const hasActiveProfile = registered_count > 0;
+  const flagged = Boolean(row.is_registered);
 
   return {
     school_id: row.school_id,
     school_name: row.school_name,
     area_zone: districtName(row),
     province: row.province,
-    is_registered: Boolean(row.is_registered) || hasProfile,
+    // Trust explicit flag from RPC (active-only); fall back to embedded profiles
+    is_registered: flagged || hasActiveProfile,
     district_id: row.district_id,
     registered_count,
   };
@@ -141,7 +145,7 @@ export function mapProfileRow(row: ProfileRow): Candidate {
   };
 }
 
-/** ~245 rows — dashboard heat cards */
+/** ~245 rows — dashboard heat cards (active profiles only; soft-deleted excluded) */
 export async function fetchDistrictStats(): Promise<DistrictStat[]> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("get_district_stats");
@@ -167,7 +171,7 @@ export async function fetchDistrictStats(): Promise<DistrictStat[]> {
   return stats;
 }
 
-/** 1 tiny row — home page counters */
+/** 1 tiny row — home page counters (active registrants only) */
 export async function fetchSchoolTotals(): Promise<SchoolTotals> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("get_school_totals");
@@ -181,7 +185,7 @@ export async function fetchSchoolTotals(): Promise<SchoolTotals> {
   };
 }
 
-/** Load schools only for one district (on card expand) — includes people count */
+/** Load schools only for one district (on card expand) — active people count */
 export async function fetchSchoolsByDistrict(districtId: string): Promise<School[]> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("get_schools_by_district", {

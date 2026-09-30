@@ -1,5 +1,22 @@
 -- Lightweight dashboard aggregates (run once in Supabase SQL Editor)
 -- Avoids downloading all ~7k school rows on every page load.
+-- Registered = school has ≥1 active profile (deleted_at IS NULL, portal user/school_admin).
+
+CREATE OR REPLACE FUNCTION public.school_has_active_registrant(p_school_id text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.profiles p
+    WHERE p.school_id = trim(p_school_id)
+      AND p.deleted_at IS NULL
+      AND COALESCE(p.portal_role, 'user') IN ('user', 'school_admin')
+  );
+$$;
 
 CREATE OR REPLACE FUNCTION public.get_district_stats()
 RETURNS TABLE (
@@ -28,10 +45,7 @@ AS $$
     ) AS province,
     COUNT(s.school_id)::bigint AS total_schools,
     COUNT(s.school_id) FILTER (
-      WHERE COALESCE(s.is_registered, false) IS TRUE
-         OR EXISTS (
-           SELECT 1 FROM public.profiles p WHERE p.school_id = s.school_id
-         )
+      WHERE public.school_has_active_registrant(s.school_id)
     )::bigint AS registered_schools
   FROM public.districts d
   LEFT JOIN public.schools s ON s.district_id = d.district_id
@@ -57,8 +71,7 @@ AS $$
     (
       SELECT COUNT(*)
       FROM public.schools s
-      WHERE COALESCE(s.is_registered, false) IS TRUE
-         OR EXISTS (SELECT 1 FROM public.profiles p WHERE p.school_id = s.school_id)
+      WHERE public.school_has_active_registrant(s.school_id)
     )::bigint,
     (SELECT COUNT(*) FROM public.districts)::bigint;
 $$;
@@ -87,14 +100,13 @@ AS $$
     s.province,
     s.district_id,
     COALESCE(d.district_name, s.district_id) AS district_name,
-    (
-      COALESCE(s.is_registered, false)
-      OR EXISTS (SELECT 1 FROM public.profiles p WHERE p.school_id = s.school_id)
-    ) AS is_registered,
+    public.school_has_active_registrant(s.school_id) AS is_registered,
     (
       SELECT COUNT(*)::bigint
       FROM public.profiles p
       WHERE p.school_id = s.school_id
+        AND p.deleted_at IS NULL
+        AND COALESCE(p.portal_role, 'user') IN ('user', 'school_admin')
     ) AS registered_count
   FROM public.schools s
   LEFT JOIN public.districts d ON d.district_id = s.district_id
