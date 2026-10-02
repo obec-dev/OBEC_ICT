@@ -1054,9 +1054,11 @@ export async function upsertWatchProgressToDb(input: {
   duration_seconds: number;
   completed: boolean;
 }) {
+  const profileId = input.profile_id?.trim();
+  if (!profileId) throw new Error("ไม่พบรหัสผู้ใช้");
   const supabase = createClient();
   const { data, error } = await supabase.rpc("upsert_watch_progress", {
-    p_profile_id: input.profile_id,
+    p_profile_id: profileId,
     p_phone: input.phone,
     p_video_id: input.video_id,
     p_watched_seconds: Math.floor(input.watched_seconds),
@@ -1067,6 +1069,9 @@ export async function upsertWatchProgressToDb(input: {
 
   const row = asRpcObj(data);
   if (!row.ok) throw new Error(String(row.error ?? "บันทึกความคืบหน้าไม่สำเร็จ"));
+  if (row.profile_id && String(row.profile_id) !== profileId) {
+    throw new Error("บันทึกความคืบหน้าไม่สำเร็จ (profile mismatch)");
+  }
 }
 
 export async function upsertExamProgressToDb(input: {
@@ -1077,12 +1082,14 @@ export async function upsertExamProgressToDb(input: {
   status: "draft" | "submitted";
   lesson_submissions?: Record<string, { status: "submitted"; submitted_at?: string }>;
 }) {
+  const profileId = input.profile_id?.trim();
+  if (!profileId) throw new Error("ไม่พบรหัสผู้ใช้");
   if (!input.project_id?.trim()) {
     throw new Error("ไม่พบโครงการ");
   }
   const supabase = createClient();
   const payload: Record<string, unknown> = {
-    p_profile_id: input.profile_id,
+    p_profile_id: profileId,
     p_phone: input.phone,
     p_project_id: input.project_id,
     p_answers: input.answers,
@@ -1096,6 +1103,10 @@ export async function upsertExamProgressToDb(input: {
 
   const row = asRpcObj(data);
   if (!row.ok) throw new Error(String(row.error ?? "บันทึกข้อสอบไม่สำเร็จ"));
+  // Server echoes verified profile_id — reject mismatches defensively
+  if (row.profile_id && String(row.profile_id) !== profileId) {
+    throw new Error("บันทึกข้อสอบไม่สำเร็จ (profile mismatch)");
+  }
 }
 
 function asLessonSubmissions(
@@ -1134,9 +1145,12 @@ function asAnswerMap(value: unknown): Record<string, string> {
 
 /** Load this candidate's own exam draft/submission. Never read answers from local storage. */
 export async function fetchMyExamProgress(profileId: string, phone: string): Promise<ExamProgress[]> {
+  const id = profileId.trim();
+  if (!id || !phone.trim()) return [];
+
   const supabase = createClient();
   const { data, error } = await supabase.rpc("get_my_exam_progress", {
-    p_profile_id: profileId,
+    p_profile_id: id,
     p_phone: phone,
     p_project_id: null,
   });
@@ -1146,20 +1160,23 @@ export async function fetchMyExamProgress(profileId: string, phone: string): Pro
   if (!row.ok) throw new Error(String(row.error ?? "โหลดคำตอบข้อสอบไม่สำเร็จ"));
   if (!Array.isArray(row.rows)) return [];
 
-  return row.rows.map((item) => {
-    const exam = asRpcObj(item);
-    return {
-      candidate_id: String(exam.profile_id ?? profileId),
-      project_id: exam.project_id ? String(exam.project_id) : undefined,
-      answers: asAnswerMap(exam.answers),
-      status: exam.status === "submitted" ? ("submitted" as const) : ("draft" as const),
-      lesson_submissions: asLessonSubmissions(exam.lesson_submissions),
-      score: exam.score != null ? Number(exam.score) : undefined,
-      passed: typeof exam.passed === "boolean" ? exam.passed : undefined,
-      graded_at: exam.graded_at ? String(exam.graded_at) : undefined,
-      updated_at: exam.updated_at ? String(exam.updated_at) : new Date().toISOString(),
-    };
-  });
+  // Strict isolation: drop any row that does not belong to this profile_id
+  return row.rows
+    .map((item) => {
+      const exam = asRpcObj(item);
+      return {
+        candidate_id: String(exam.profile_id ?? ""),
+        project_id: exam.project_id ? String(exam.project_id) : undefined,
+        answers: asAnswerMap(exam.answers),
+        status: exam.status === "submitted" ? ("submitted" as const) : ("draft" as const),
+        lesson_submissions: asLessonSubmissions(exam.lesson_submissions),
+        score: exam.score != null ? Number(exam.score) : undefined,
+        passed: typeof exam.passed === "boolean" ? exam.passed : undefined,
+        graded_at: exam.graded_at ? String(exam.graded_at) : undefined,
+        updated_at: exam.updated_at ? String(exam.updated_at) : new Date().toISOString(),
+      };
+    })
+    .filter((exam) => exam.candidate_id === id);
 }
 
 /** @deprecated Public exam progress scans are blocked. Use adminListExamProgressRpc. */
