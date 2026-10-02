@@ -76,7 +76,16 @@ function ProjectsManagementContent() {
     gradeProjectExams,
     bulkSaveAnswerKeys,
     adminToken,
+    refreshData,
   } = useIctStore();
+
+  useEffect(() => {
+    void refreshData({
+      includeLearning: true,
+      includeAdminQuestions: true,
+      force: true,
+    });
+  }, [refreshData]);
 
   const siteProject = getSiteProject(projects);
   const selectedProjectId = siteProject?.id || DEFAULT_PROJECT_ID;

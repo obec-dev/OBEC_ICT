@@ -364,7 +364,8 @@ export async function adminListExamProgressRpc(
     return {
       candidate_id: String(row.profile_id ?? ""),
       project_id: row.project_id ? String(row.project_id) : undefined,
-      answers: (row.answers as Record<string, string>) || {},
+      // List RPC is slim — answers intentionally empty until admin_get_exam_answers
+      answers: {},
       status: row.status === "submitted" ? ("submitted" as const) : ("draft" as const),
       lesson_submissions:
         row.lesson_submissions && typeof row.lesson_submissions === "object"
@@ -376,6 +377,38 @@ export async function adminListExamProgressRpc(
       updated_at: row.updated_at ? String(row.updated_at) : new Date().toISOString(),
     };
   });
+}
+
+/** Lazy-load full answers JSONB for one candidate (detail drawer). */
+export async function adminGetExamAnswersRpc(
+  token: string,
+  profileId: string,
+  projectId?: string
+): Promise<ExamProgress | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_get_exam_answers", {
+    p_token: token,
+    p_profile_id: profileId,
+    p_project_id: projectId ?? null,
+  });
+  if (error) throw adminRpcFail(error);
+  const row = asObj(data);
+  if (row.ok === false) throw new Error(String(row.error ?? "โหลดคำตอบไม่สำเร็จ"));
+  if (!row.profile_id && !row.status) return null;
+  return {
+    candidate_id: String(row.profile_id ?? profileId),
+    project_id: row.project_id ? String(row.project_id) : undefined,
+    answers: (row.answers as Record<string, string>) || {},
+    status: row.status === "submitted" ? ("submitted" as const) : ("draft" as const),
+    lesson_submissions:
+      row.lesson_submissions && typeof row.lesson_submissions === "object"
+        ? (row.lesson_submissions as ExamProgress["lesson_submissions"])
+        : {},
+    score: row.score != null ? Number(row.score) : undefined,
+    passed: typeof row.passed === "boolean" ? row.passed : undefined,
+    graded_at: row.graded_at ? String(row.graded_at) : undefined,
+    updated_at: row.updated_at ? String(row.updated_at) : new Date().toISOString(),
+  };
 }
 
 export async function adminListQuestionsRpc(token: string, projectId?: string) {
@@ -772,24 +805,64 @@ export async function adminExportHierarchyRpc(token: string, mode: "district" | 
   return data.map((item) => asObj(item));
 }
 
-export async function adminExportParticipantsFullRpc(token: string) {
+export type AdminExportSlice = {
+  districtId?: string;
+  province?: string;
+  /** Max rows per request (server caps at 5000; default 2000). */
+  limit?: number;
+  offset?: number;
+};
+
+export async function adminExportParticipantsFullRpc(
+  token: string,
+  opts: AdminExportSlice = {}
+) {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_export_participants_full", {
     p_token: token,
+    p_district_id: opts.districtId?.trim() || null,
+    p_province: opts.province?.trim() || null,
+    p_limit: opts.limit ?? 2000,
+    p_offset: opts.offset ?? 0,
   });
   if (error) throw adminRpcFail(error);
   if (!Array.isArray(data)) return [];
   return data.map((item) => asObj(item));
 }
 
-export async function adminExportRegistrationDetailsRpc(token: string) {
+export async function adminExportRegistrationDetailsRpc(
+  token: string,
+  opts: AdminExportSlice = {}
+) {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_export_registration_details", {
     p_token: token,
+    p_district_id: opts.districtId?.trim() || null,
+    p_province: opts.province?.trim() || null,
+    p_limit: opts.limit ?? 2000,
+    p_offset: opts.offset ?? 0,
   });
   if (error) throw adminRpcFail(error);
   if (!Array.isArray(data)) return [];
   return data.map((item) => asObj(item));
+}
+
+/** Page through export RPC until a short page is returned (chunked nationwide dump). */
+export async function adminExportAllChunks(
+  fetchPage: (offset: number, limit: number) => Promise<Record<string, unknown>[]>,
+  chunkSize = 2000,
+  maxRows = 100_000
+): Promise<Record<string, unknown>[]> {
+  const all: Record<string, unknown>[] = [];
+  let offset = 0;
+  const limit = Math.max(1, Math.min(chunkSize, 5000));
+  while (all.length < maxRows) {
+    const page = await fetchPage(offset, limit);
+    all.push(...page);
+    if (page.length < limit) break;
+    offset += limit;
+  }
+  return all;
 }
 
 export async function adminMissionProgressStats(token: string) {

@@ -47,7 +47,12 @@ function LearnContent() {
     projects,
     videos,
     questions,
+    ensureLearningContent,
   } = useIctStore();
+
+  useEffect(() => {
+    void ensureLearningContent();
+  }, [ensureLearningContent]);
 
   const currentProject = useMemo(() => getSiteProject(projects), [projects]);
   const projectVideos = useMemo(

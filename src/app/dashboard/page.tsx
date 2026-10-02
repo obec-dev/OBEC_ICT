@@ -9,7 +9,14 @@ import { fetchSchoolsByDistrict, searchSchoolsByName } from "@/lib/supabase/data
 import type { DistrictStat, School } from "@/types/ict";
 
 function DashboardContent() {
-  const { districtStats, schoolTotals, loading, loadError, refreshData } = useIctStore();
+  const {
+    districtStats,
+    schoolTotals,
+    loading,
+    loadError,
+    refreshData,
+    ensureDistrictStats,
+  } = useIctStore();
   const [schoolQuery, setSchoolQuery] = useState("");
   const [areaZone, setAreaZone] = useState("");
   const [province, setProvince] = useState("");
@@ -21,6 +28,10 @@ function DashboardContent() {
   const [expandError, setExpandError] = useState<string | null>(null);
   const [searchHits, setSearchHits] = useState<School[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+
+  useEffect(() => {
+    void ensureDistrictStats();
+  }, [ensureDistrictStats]);
 
   const areaOptions = useMemo(
     () => [...new Set(districtStats.map((d) => d.district_name))].sort((a, b) => a.localeCompare(b, "th")),
@@ -137,7 +148,11 @@ function DashboardContent() {
               <code>supabase/dashboard_stats.sql</code>
             </span>
           </span>
-          <button type="button" onClick={() => void refreshData()} className="shrink-0 font-bold underline">
+          <button
+            type="button"
+            onClick={() => void refreshData({ includeDistricts: true, force: true })}
+            className="shrink-0 font-bold underline"
+          >
             ลองใหม่
           </button>
         </div>
@@ -145,7 +160,7 @@ function DashboardContent() {
 
       {loading && (
         <div className="mb-6 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-[var(--primary-blue)]">
-          กำลังโหลดสรุปเขตพื้นที่ (ข้อมูลเบา ไม่ดึงโรงเรียนทั้งหมด)...
+          กำลังโหลดสรุปเขตพื้นที่...
         </div>
       )}
 

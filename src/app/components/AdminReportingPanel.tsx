@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useIctStore } from "@/contexts/IctStore";
 import {
+  adminExportAllChunks,
   adminExportExamResponsesRpc,
   adminExportHierarchyRpc,
   adminExportParticipantsFullRpc,
@@ -15,7 +16,9 @@ import {
   ICT_SURVEY_CSV_COLUMNS,
 } from "@/lib/registrationOptions";
 import { getSiteProject } from "@/lib/siteSettings";
-import type { ProjectQuestion } from "@/types/ict";
+import { fetchDistrictStats } from "@/lib/supabase/data";
+import { inputClass } from "@/lib/styles";
+import type { DistrictStat, ProjectQuestion } from "@/types/ict";
 
 function csvEscape(value: string) {
   return `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -207,12 +210,64 @@ export function ExamResultsExportPanel() {
   );
 }
 
-/** District / Partner summary downloads only. */
+const DEFAULT_CHUNK = 2000;
+
+/** District / Partner summary downloads + chunked participant/registration exports. */
 export function AnalyticsReportsPanel() {
-  const { adminToken } = useIctStore();
+  const { adminToken, districtStats } = useIctStore();
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [districtId, setDistrictId] = useState("");
+  const [province, setProvince] = useState("");
+  const [chunkSize, setChunkSize] = useState(String(DEFAULT_CHUNK));
+  const [offset, setOffset] = useState("0");
+  const [chunkOnly, setChunkOnly] = useState(false);
+  const [districtCatalog, setDistrictCatalog] = useState<DistrictStat[]>(districtStats);
+
+  useEffect(() => {
+    if (districtStats.length > 0) {
+      setDistrictCatalog(districtStats);
+      return;
+    }
+    void fetchDistrictStats()
+      .then(setDistrictCatalog)
+      .catch(() => {
+        /* keep empty filters */
+      });
+  }, [districtStats]);
+
+  const provinceOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of districtCatalog) {
+      if (d.province?.trim()) set.add(d.province.trim());
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "th"));
+  }, [districtCatalog]);
+
+  const districtOptions = useMemo(() => {
+    const rows = province
+      ? districtCatalog.filter((d) => d.province === province)
+      : districtCatalog;
+    return [...rows].sort((a, b) => a.district_name.localeCompare(b.district_name, "th"));
+  }, [districtCatalog, province]);
+
+  const sliceOpts = () => ({
+    districtId: districtId || undefined,
+    province: province || undefined,
+  });
+
+  const parsedLimit = () => {
+    const n = Number(chunkSize);
+    if (!Number.isFinite(n) || n < 1) return DEFAULT_CHUNK;
+    return Math.min(Math.floor(n), 5000);
+  };
+
+  const parsedOffset = () => {
+    const n = Number(offset);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    return Math.floor(n);
+  };
 
   const show = (msg: string, isErr = false) => {
     if (isErr) {
@@ -307,13 +362,61 @@ export function AnalyticsReportsPanel() {
     }
   };
 
+  const loadParticipantRows = async () => {
+    if (!adminToken) throw new Error("กรุณาเข้าสู่ระบบผู้ดูแลใหม่");
+    const limit = parsedLimit();
+    const base = sliceOpts();
+    if (chunkOnly) {
+      return adminExportParticipantsFullRpc(adminToken, {
+        ...base,
+        limit,
+        offset: parsedOffset(),
+      });
+    }
+    return adminExportAllChunks(
+      (off, lim) =>
+        adminExportParticipantsFullRpc(adminToken, {
+          ...base,
+          limit: lim,
+          offset: off,
+        }),
+      limit
+    );
+  };
+
+  const loadRegistrationRows = async () => {
+    if (!adminToken) throw new Error("กรุณาเข้าสู่ระบบผู้ดูแลใหม่");
+    const limit = parsedLimit();
+    const base = sliceOpts();
+    if (chunkOnly) {
+      return adminExportRegistrationDetailsRpc(adminToken, {
+        ...base,
+        limit,
+        offset: parsedOffset(),
+      });
+    }
+    return adminExportAllChunks(
+      (off, lim) =>
+        adminExportRegistrationDetailsRpc(adminToken, {
+          ...base,
+          limit: lim,
+          offset: off,
+        }),
+      limit
+    );
+  };
+
   const exportParticipantsFull = async () => {
     if (!adminToken) return;
     setBusy(true);
     setError("");
     setStatus("");
     try {
-      const rows = await adminExportParticipantsFullRpc(adminToken);
+      const rows = await loadParticipantRows();
+      if (rows.length === 0) {
+        show("ไม่พบข้อมูลสำหรับส่งออก", true);
+        return;
+      }
       const headers = [
         "หมายเลขสมาชิก",
         "ชื่อ-นามสกุล",
@@ -354,12 +457,23 @@ export function AnalyticsReportsPanel() {
       ];
       const body = rows.map((r) => keys.map((h) => csvEscape(String(r[h] ?? ""))).join(","));
       const timestamp = new Date().toISOString().slice(0, 10);
+      const sliceTag = [
+        districtId ? `d${districtId}` : "",
+        province ? province.replace(/\s+/g, "_") : "",
+        chunkOnly ? `off${parsedOffset()}` : "all",
+      ]
+        .filter(Boolean)
+        .join("_");
       downloadTextFile(
         "\uFEFF" + [headers.join(","), ...body].join("\n"),
-        `participants_full_${timestamp}.csv`,
+        `participants_full_${sliceTag || "all"}_${timestamp}.csv`,
         "text/csv;charset=utf-8;"
       );
-      show(`ส่งออกข้อมูลผู้เข้าร่วมโครงการทั้งหมดสำเร็จ (${rows.length} แถว)`);
+      show(
+        chunkOnly
+          ? `ส่งออกชิ้นส่วนสำเร็จ (${rows.length} แถว · offset ${parsedOffset()})`
+          : `ส่งออกข้อมูลผู้เข้าร่วมสำเร็จ (${rows.length} แถว · แบ่งโหลดทีละ ${parsedLimit()})`
+      );
     } catch (err) {
       show(err instanceof Error ? err.message : "ส่งออกไม่สำเร็จ", true);
     } finally {
@@ -373,7 +487,11 @@ export function AnalyticsReportsPanel() {
     setError("");
     setStatus("");
     try {
-      const rows = await adminExportRegistrationDetailsRpc(adminToken);
+      const rows = await loadRegistrationRows();
+      if (rows.length === 0) {
+        show("ไม่พบข้อมูลสำหรับส่งออก", true);
+        return;
+      }
       const surveyKeys = ICT_SURVEY_CSV_COLUMNS.map((c) => c.key);
       const surveyLabels = ICT_SURVEY_CSV_COLUMNS.map((c) => c.label);
       const headers = [
@@ -459,12 +577,23 @@ export function AnalyticsReportsPanel() {
         ].join(",");
       });
       const timestamp = new Date().toISOString().slice(0, 10);
+      const sliceTag = [
+        districtId ? `d${districtId}` : "",
+        province ? province.replace(/\s+/g, "_") : "",
+        chunkOnly ? `off${parsedOffset()}` : "all",
+      ]
+        .filter(Boolean)
+        .join("_");
       downloadTextFile(
         "\uFEFF" + [headers.join(","), ...body].join("\n"),
-        `registration_details_${timestamp}.csv`,
+        `registration_details_${sliceTag || "all"}_${timestamp}.csv`,
         "text/csv;charset=utf-8;"
       );
-      show(`ส่งออกข้อมูลการลงทะเบียนสำเร็จ (${rows.length} แถว)`);
+      show(
+        chunkOnly
+          ? `ส่งออกชิ้นส่วนการลงทะเบียนสำเร็จ (${rows.length} แถว · offset ${parsedOffset()})`
+          : `ส่งออกข้อมูลการลงทะเบียนสำเร็จ (${rows.length} แถว · แบ่งโหลดทีละ ${parsedLimit()})`
+      );
     } catch (err) {
       show(err instanceof Error ? err.message : "ส่งออกไม่สำเร็จ", true);
     } finally {
@@ -479,7 +608,75 @@ export function AnalyticsReportsPanel() {
       </h2>
       <p className="text-xs text-gray-500 dark:text-white/70 mb-4">
         ดาวน์โหลดรายงานสรุประดับเขตพื้นที่ เครือข่ายพันธมิตร และข้อมูลผู้เข้าร่วม/การลงทะเบียน
+        — รองรับกรองจังหวัด/เขต และส่งออกแบบชิ้นส่วนเพื่อลด egress
       </p>
+
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 space-y-1">
+          <span>จังหวัด (กรองส่งออก)</span>
+          <select
+            className={inputClass}
+            value={province}
+            onChange={(e) => {
+              setProvince(e.target.value);
+              setDistrictId("");
+            }}
+          >
+            <option value="">ทุกจังหวัด</option>
+            {provinceOptions.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 space-y-1">
+          <span>เขตพื้นที่</span>
+          <select
+            className={inputClass}
+            value={districtId}
+            onChange={(e) => setDistrictId(e.target.value)}
+          >
+            <option value="">ทุกเขต</option>
+            {districtOptions.map((d) => (
+              <option key={d.district_id} value={d.district_id}>
+                {d.district_name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 space-y-1">
+          <span>ขนาดชิ้นส่วน (สูงสุด 5000)</span>
+          <input
+            className={inputClass}
+            type="number"
+            min={1}
+            max={5000}
+            value={chunkSize}
+            onChange={(e) => setChunkSize(e.target.value)}
+          />
+        </label>
+        <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 space-y-1">
+          <span>Offset (เมื่อส่งออกชิ้นเดียว)</span>
+          <input
+            className={inputClass}
+            type="number"
+            min={0}
+            value={offset}
+            disabled={!chunkOnly}
+            onChange={(e) => setOffset(e.target.value)}
+          />
+        </label>
+      </div>
+      <label className="mb-4 flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+        <input
+          type="checkbox"
+          checked={chunkOnly}
+          onChange={(e) => setChunkOnly(e.target.checked)}
+        />
+        ส่งออกเฉพาะชิ้นส่วนเดียว (ไม่วนโหลดทุกหน้า) — ใช้ Offset ด้านบน
+      </label>
+
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -503,7 +700,7 @@ export function AnalyticsReportsPanel() {
           onClick={() => void exportParticipantsFull()}
           className="px-4 py-2.5 rounded-lg border border-blue-300 bg-blue-50 text-blue-900 font-bold text-xs disabled:opacity-40"
         >
-          ดาวน์โหลดข้อมูลผู้เข้าร่วมโครงการทั้งหมด (Full Participant Data)
+          ดาวน์โหลดข้อมูลผู้เข้าร่วมโครงการ (Full Participant Data)
         </button>
         <button
           type="button"

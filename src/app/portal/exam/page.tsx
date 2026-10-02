@@ -383,7 +383,12 @@ function ExamContent() {
     examProgressReady,
     examProgressError,
     reloadExamProgress,
+    ensureLearningContent,
   } = useIctStore();
+
+  useEffect(() => {
+    void ensureLearningContent();
+  }, [ensureLearningContent]);
 
   const currentProject = useMemo(() => getSiteProject(projects), [projects]);
 

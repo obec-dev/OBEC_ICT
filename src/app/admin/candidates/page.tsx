@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { Combobox } from "@/app/components/Combobox";
@@ -9,6 +9,7 @@ import { useExamAttemptFilters } from "@/hooks/useAdminUserFilters";
 import { getSiteProject } from "@/lib/siteSettings";
 import {
   adminDeleteExamProgressRpc,
+  adminGetExamAnswersRpc,
   adminListExamProgressRpc,
   adminSearchProfiles,
   adminSearchUsers,
@@ -54,6 +55,10 @@ function CandidatesContent() {
   const [message, setMessage] = useState("");
   const [unlockingId, setUnlockingId] = useState<string | null>(null);
   const [preloadedSchools, setPreloadedSchools] = useState<string[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [answersLoadingId, setAnswersLoadingId] = useState<string | null>(null);
+  const [detailAnswers, setDetailAnswers] = useState<Record<string, ExamProgress>>({});
+  const [detailError, setDetailError] = useState("");
 
   const attemptRows = useMemo(
     () =>
@@ -192,12 +197,18 @@ function CandidatesContent() {
       delete next[profileId];
       return next;
     });
+    setDetailAnswers((prev) => {
+      const next = { ...prev };
+      delete next[profileId];
+      return next;
+    });
+    if (expandedId === profileId) setExpandedId(null);
     setMessage(
       result.deleted > 0
         ? "ล้างข้อมูลข้อสอบแล้ว — โปรไฟล์ผู้สมัครยังคงอยู่ในระบบ"
         : "ไม่พบข้อมูลข้อสอบให้ลบ (โปรไฟล์ยังคงอยู่)"
     );
-    void refreshData();
+    void refreshData({ includeDistricts: true, includeLearning: false });
   };
 
   const unlockExam = async (profileId: string) => {
@@ -226,11 +237,54 @@ function CandidatesContent() {
         },
       };
     });
+    setDetailAnswers((prev) => {
+      const next = { ...prev };
+      delete next[profileId];
+      return next;
+    });
     setMessage(
       result.updated > 0
         ? "ปลดล็อกข้อสอบแล้ว — ผู้สมัครสามารถแก้ไขคำตอบเดิมและส่งใหม่ได้"
         : "ไม่พบแถวข้อสอบที่ส่งแล้ว (อาจยังไม่เคยส่ง)"
     );
+  };
+
+  const toggleAnswersDrawer = async (profileId: string) => {
+    if (expandedId === profileId) {
+      setExpandedId(null);
+      setDetailError("");
+      return;
+    }
+    setExpandedId(profileId);
+    setDetailError("");
+    if (detailAnswers[profileId]) return;
+    if (!adminToken) {
+      setDetailError("กรุณาเข้าสู่ระบบผู้ดูแลใหม่");
+      return;
+    }
+    setAnswersLoadingId(profileId);
+    try {
+      const full = await adminGetExamAnswersRpc(adminToken, profileId, projectId);
+      if (full) {
+        setDetailAnswers((prev) => ({ ...prev, [profileId]: full }));
+        setExamMap((prev) => ({
+          ...prev,
+          [profileId]: {
+            ...(prev[profileId] ?? full),
+            ...full,
+            // Keep slim list lesson map if detail somehow empty
+            lesson_submissions:
+              Object.keys(full.lesson_submissions || {}).length > 0
+                ? full.lesson_submissions
+                : prev[profileId]?.lesson_submissions,
+          },
+        }));
+      }
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "โหลดคำตอบไม่สำเร็จ");
+    } finally {
+      setAnswersLoadingId(null);
+    }
   };
 
   return (
@@ -320,39 +374,100 @@ function CandidatesContent() {
                 filtered.map((row) => {
                   const exam = examMap[row.id];
                   const status = examStatusLabel(exam);
+                  const detail = detailAnswers[row.id];
+                  const answerEntries = Object.entries(detail?.answers || {});
+                  const isOpen = expandedId === row.id;
                   return (
-                    <tr key={row.id} className="border-t border-gray-100 dark:border-slate-800">
-                      <td className="px-4 py-3 font-mono text-xs">{row.login_email || row.email || "-"}</td>
-                      <td className="px-4 py-3 font-semibold">{row.full_name}</td>
-                      <td className="px-4 py-3 text-xs">
-                        {row.school_name || "-"}
-                        <div className="text-gray-400">{row.school_id}</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`rounded-full px-2 py-1 text-xs font-bold ${status.className}`}>
-                          {status.text}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={unlockingId === row.id || !canAdminUnlockExam(exam)}
-                            onClick={() => void unlockExam(row.id)}
-                            className="rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-900 disabled:opacity-40"
-                          >
-                            ปลดล็อก
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void clearExamData(row.id)}
-                            className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700"
-                          >
-                            ล้างข้อมูลสอบ
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                    <Fragment key={row.id}>
+                      <tr className="border-t border-gray-100 dark:border-slate-800">
+                        <td className="px-4 py-3 font-mono text-xs">{row.login_email || row.email || "-"}</td>
+                        <td className="px-4 py-3 font-semibold">{row.full_name}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {row.school_name || "-"}
+                          <div className="text-gray-400">{row.school_id}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-2 py-1 text-xs font-bold ${status.className}`}>
+                            {status.text}
+                          </span>
+                          {exam?.score != null && (
+                            <div className="mt-1 text-[11px] text-gray-500">คะแนน {exam.score}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void toggleAnswersDrawer(row.id)}
+                              className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-800"
+                            >
+                              {isOpen ? "ปิดรายละเอียด" : "ดูคำตอบ"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={unlockingId === row.id || !canAdminUnlockExam(exam)}
+                              onClick={() => void unlockExam(row.id)}
+                              className="rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-900 disabled:opacity-40"
+                            >
+                              ปลดล็อก
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void clearExamData(row.id)}
+                              className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700"
+                            >
+                              ล้างข้อมูลสอบ
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="bg-slate-50 dark:bg-slate-950/60">
+                          <td colSpan={5} className="px-4 py-4">
+                            {answersLoadingId === row.id ? (
+                              <p className="text-xs text-gray-500">กำลังโหลดคำตอบ...</p>
+                            ) : detailError && !detail ? (
+                              <p className="text-xs text-[var(--accent-red)]">{detailError}</p>
+                            ) : (
+                              <div className="space-y-2 text-xs">
+                                <p className="font-bold text-slate-700 dark:text-slate-200">
+                                  คำตอบ ({answerEntries.length} ข้อ)
+                                  {detail?.status ? ` · สถานะ ${detail.status}` : ""}
+                                  {detail?.updated_at
+                                    ? ` · อัปเดต ${new Date(detail.updated_at).toLocaleString("th-TH")}`
+                                    : ""}
+                                </p>
+                                {answerEntries.length === 0 ? (
+                                  <p className="text-gray-400">ยังไม่มีคำตอบในระบบ</p>
+                                ) : (
+                                  <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                                    <table className="w-full text-left">
+                                      <thead className="bg-slate-100 dark:bg-slate-800 text-[11px]">
+                                        <tr>
+                                          <th className="px-3 py-2">รหัสข้อ</th>
+                                          <th className="px-3 py-2">คำตอบ</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {answerEntries.map(([qid, ans]) => (
+                                          <tr
+                                            key={qid}
+                                            className="border-t border-slate-100 dark:border-slate-800"
+                                          >
+                                            <td className="px-3 py-1.5 font-mono">{qid}</td>
+                                            <td className="px-3 py-1.5">{ans || "—"}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })
               )}

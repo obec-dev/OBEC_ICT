@@ -145,13 +145,10 @@ export function mapProfileRow(row: ProfileRow): Candidate {
   };
 }
 
-/** ~245 rows — dashboard heat cards (active profiles only; soft-deleted excluded) */
-export async function fetchDistrictStats(): Promise<DistrictStat[]> {
-  const supabase = createClient();
-  const { data, error } = await supabase.rpc("get_district_stats");
-  if (error) throw new Error(error.message);
-
-  const stats: DistrictStat[] = (data ?? []).map(
+/** Map district-stats RPC rows → DistrictStat[] */
+function mapDistrictStatsRows(data: unknown): DistrictStat[] {
+  if (!Array.isArray(data)) return [];
+  return data.map(
     (row: {
       district_id: string;
       district_name: string;
@@ -166,23 +163,69 @@ export async function fetchDistrictStats(): Promise<DistrictStat[]> {
       registered_schools: Number(row.registered_schools) || 0,
     })
   );
-
-  // Rely on get_district_stats only (no public profiles scan — PII leak)
-  return stats;
 }
 
-/** 1 tiny row — home page counters (active registrants only) */
-export async function fetchSchoolTotals(): Promise<SchoolTotals> {
+function mapSchoolTotalsRow(data: unknown): SchoolTotals {
+  const row = Array.isArray(data) ? data[0] : data;
+  const totals = (row && typeof row === "object" ? row : {}) as {
+    total_schools?: number | string;
+    registered_schools?: number | string;
+    total_districts?: number | string;
+  };
+  return {
+    total: Number(totals.total_schools) || 0,
+    registered: Number(totals.registered_schools) || 0,
+    zones: Number(totals.total_districts) || 0,
+  };
+}
+
+async function fetchDistrictStatsViaRpc(): Promise<DistrictStat[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("get_district_stats");
+  if (error) throw new Error(error.message);
+  return mapDistrictStatsRows(data);
+}
+
+async function fetchSchoolTotalsViaRpc(): Promise<SchoolTotals> {
   const supabase = createClient();
   const { data, error } = await supabase.rpc("get_school_totals");
   if (error) throw new Error(error.message);
+  return mapSchoolTotalsRow(data);
+}
 
-  const row = Array.isArray(data) ? data[0] : data;
-  return {
-    total: Number(row?.total_schools) || 0,
-    registered: Number(row?.registered_schools) || 0,
-    zones: Number(row?.total_districts) || 0,
-  };
+/**
+ * Prefer cached Next route (CDN / unstable_cache). Fall back to browser RPC when
+ * the route fails (common in local TLS / turbopack environments).
+ */
+export async function fetchDistrictStats(): Promise<DistrictStat[]> {
+  try {
+    const res = await fetch("/api/stats/districts", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    if (res.ok) {
+      return mapDistrictStatsRows(await res.json());
+    }
+  } catch {
+    /* fall through to RPC */
+  }
+  return fetchDistrictStatsViaRpc();
+}
+
+/** Prefer cached Next route; fall back to browser RPC on failure. */
+export async function fetchSchoolTotals(): Promise<SchoolTotals> {
+  try {
+    const res = await fetch("/api/stats/school-totals", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    if (res.ok) {
+      return mapSchoolTotalsRow(await res.json());
+    }
+  } catch {
+    /* fall through to RPC */
+  }
+  return fetchSchoolTotalsViaRpc();
 }
 
 /** Load schools only for one district (on card expand) — active people count */
@@ -582,7 +625,7 @@ export async function loginCandidateWithPassword(
   }
 
   const candidate = mapRpcProfileJson(asRpcObj(row.profile));
-  // login_candidate only returns ok after the password is already set and verified.
+  // Slim login DTO omits ict_survey; mapRpcProfileJson leaves it undefined.
   candidate.must_set_password = false;
   return { ok: true, kind: "candidate", candidate };
 }
@@ -1144,7 +1187,11 @@ function asAnswerMap(value: unknown): Record<string, string> {
 }
 
 /** Load this candidate's own exam draft/submission. Never read answers from local storage. */
-export async function fetchMyExamProgress(profileId: string, phone: string): Promise<ExamProgress[]> {
+export async function fetchMyExamProgress(
+  profileId: string,
+  phone: string,
+  projectId?: string | null
+): Promise<ExamProgress[]> {
   const id = profileId.trim();
   if (!id || !phone.trim()) return [];
 
@@ -1152,7 +1199,7 @@ export async function fetchMyExamProgress(profileId: string, phone: string): Pro
   const { data, error } = await supabase.rpc("get_my_exam_progress", {
     p_profile_id: id,
     p_phone: phone,
-    p_project_id: null,
+    p_project_id: projectId?.trim() || null,
   });
   if (error) throw new Error(error.message);
 

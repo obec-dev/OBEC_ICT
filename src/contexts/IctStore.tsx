@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { LEARNING_VIDEO_ID } from "@/data/schools";
@@ -114,11 +115,26 @@ type RegisterInput = {
   project_id?: string;
 };
 
+type RefreshDataOpts = {
+  /** Load district heat-map stats (dashboard / admin filters). Default false on hydrate. */
+  includeDistricts?: boolean;
+  /** Load videos + public exam questions. Default false on hydrate; true for candidates. */
+  includeLearning?: boolean;
+  /** Load admin questions with answer keys. Default false — only admin project pages. */
+  includeAdminQuestions?: boolean;
+  /** Bypass TTL caches */
+  force?: boolean;
+};
+
 type IctStoreValue = {
   hydrated: boolean;
   loading: boolean;
   loadError: string | null;
-  refreshData: () => Promise<void>;
+  refreshData: (opts?: RefreshDataOpts) => Promise<void>;
+  /** Lazy-load district stats when opening /dashboard */
+  ensureDistrictStats: (opts?: { force?: boolean }) => Promise<void>;
+  /** Lazy-load videos + public questions for learn/exam */
+  ensureLearningContent: (opts?: { force?: boolean }) => Promise<void>;
   districtStats: DistrictStat[];
   schoolTotals: SchoolTotals;
   candidates: Candidate[];
@@ -257,20 +273,43 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   const [questions, setQuestions] = useState<ProjectQuestion[]>(MOCK_QUESTIONS);
   const [activeProjectId, setActiveProjectId] = useState<string>("ict-talent-2026");
   const [session, setSession] = useState<SessionUser | null>(null);
+  const districtFetchedAtRef = useRef(0);
+  const learningFetchedAtRef = useRef(0);
+  const DISTRICT_TTL_MS = 10 * 60 * 1000;
+  const LEARNING_TTL_MS = 5 * 60 * 1000;
 
-  const refreshData = useCallback(async () => {
+  const refreshData = useCallback(async (opts?: RefreshDataOpts) => {
+    const includeDistricts = opts?.includeDistricts === true;
+    const includeLearning = opts?.includeLearning === true;
+    const includeAdminQuestions = opts?.includeAdminQuestions === true;
+    const force = opts?.force === true;
+
     setLoading(true);
     setLoadError(null);
     try {
-      const [stats, totals, dbProjects, dbVideos, publicQuestions] = await Promise.all([
-        fetchDistrictStats(),
+      const now = Date.now();
+      const needDistricts =
+        includeDistricts && (force || now - districtFetchedAtRef.current > DISTRICT_TTL_MS);
+      const needLearning =
+        includeLearning && (force || now - learningFetchedAtRef.current > LEARNING_TTL_MS);
+
+      // Projects + totals are small and needed on most pages (home CTA / schedule).
+      // Soft-fail totals so district dashboard still loads when only totals break.
+      const [totalsResult, projectsResult] = await Promise.allSettled([
         fetchSchoolTotals(),
         fetchProjects(),
-        fetchProjectVideos(),
-        fetchPublicExamQuestions(),
       ]);
-      setDistrictStats(stats);
-      setSchoolTotals(totals);
+      if (totalsResult.status === "fulfilled") {
+        setSchoolTotals(totalsResult.value);
+      }
+      const dbProjects =
+        projectsResult.status === "fulfilled" ? projectsResult.value : null;
+      if (dbProjects?.length) setProjects(dbProjects);
+      if (projectsResult.status === "rejected" && !includeDistricts) {
+        throw projectsResult.reason instanceof Error
+          ? projectsResult.reason
+          : new Error("โหลดโครงการไม่สำเร็จ");
+      }
 
       const sess = readSession();
       if (sess?.kind === "candidate") {
@@ -279,18 +318,42 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         setCandidates([]);
       }
 
-      if (dbProjects?.length) setProjects(dbProjects);
-      if (dbVideos?.length) setVideos(dbVideos);
-
       const siteId = getSiteProject(dbProjects?.length ? dbProjects : MOCK_PROJECTS)?.id;
-      const publicForSite = siteId
-        ? publicQuestions.filter((q) => !q.project_id || q.project_id === siteId)
-        : publicQuestions;
-      setQuestions(publicForSite as ProjectQuestion[]);
 
-      if (sess?.kind === "admin" && sess.token) {
+      const parallel: Promise<void>[] = [];
+
+      if (needDistricts) {
+        parallel.push(
+          fetchDistrictStats().then((stats) => {
+            setDistrictStats(stats);
+            districtFetchedAtRef.current = Date.now();
+          })
+        );
+      }
+
+      if (needLearning) {
+        parallel.push(
+          (async () => {
+            const [dbVideos, publicQuestions] = await Promise.all([
+              fetchProjectVideos(siteId),
+              fetchPublicExamQuestions(siteId),
+            ]);
+            if (dbVideos?.length) setVideos(dbVideos);
+            const publicForSite = siteId
+              ? publicQuestions.filter((q) => !q.project_id || q.project_id === siteId)
+              : publicQuestions;
+            setQuestions(publicForSite as ProjectQuestion[]);
+            learningFetchedAtRef.current = Date.now();
+          })()
+        );
+      }
+
+      await Promise.all(parallel);
+
+      // Answer keys are heavy — never pull on every hydrate; only when admin project UI asks
+      if (includeAdminQuestions && sess?.kind === "admin" && sess.token) {
         try {
-          const adminQs = await adminFetchProjectQuestions(sess.token);
+          const adminQs = await adminFetchProjectQuestions(sess.token, siteId);
           if (adminQs.length) setQuestions(adminQs);
         } catch {
           /* keep public questions if admin RPC fails */
@@ -302,6 +365,20 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
   }, []);
+
+  const ensureDistrictStats = useCallback(
+    async (opts?: { force?: boolean }) => {
+      await refreshData({ includeDistricts: true, force: opts?.force });
+    },
+    [refreshData]
+  );
+
+  const ensureLearningContent = useCallback(
+    async (opts?: { force?: boolean }) => {
+      await refreshData({ includeLearning: true, force: opts?.force });
+    },
+    [refreshData]
+  );
 
   const forgetExamProgress = useCallback(() => {
     setExamProgress([]);
@@ -317,7 +394,8 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       }
       setExamProgressError(null);
       try {
-        const rows = await fetchMyExamProgress(candidate.id, candidate.phone);
+        const siteId = getSiteProject(projects)?.id ?? activeProjectId;
+        const rows = await fetchMyExamProgress(candidate.id, candidate.phone, siteId);
         setExamProgress(rows);
       } catch (err) {
         setExamProgress([]);
@@ -326,38 +404,59 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         setExamProgressReady(true);
       }
     },
-    []
+    [activeProjectId, projects]
   );
+  const loadCandidateExamProgressRef = useRef(loadCandidateExamProgress);
+  loadCandidateExamProgressRef.current = loadCandidateExamProgress;
 
   useEffect(() => {
-    const persisted = readPersistedState();
-    if (persisted) {
-      setWatchProgress(persisted.watchProgress ?? []);
-      if (persisted.projects?.length) setProjects(persisted.projects);
-      if (persisted.videos?.length) setVideos(persisted.videos);
-      if (persisted.questions?.length) setQuestions(stripQuestionKeys(persisted.questions));
-    }
-    // Exam answers are confidential and must not be restored from the browser cache.
-    setExamProgress([]);
-    clearStoredExamAnswers();
+    let cancelled = false;
 
-    // Drop idle / closed-tab sessions before hydrating UI
-    let existing = readSession();
-    if (existing && isSessionIdleExpired()) {
-      writeSession(null);
-      existing = null;
-    }
-    setSession(existing);
-    // Re-sync access-role cookie so middleware can enforce path matrix
-    writeSession(existing);
-    setHydrated(true);
-    void refreshData();
-    if (existing?.kind === "candidate") {
-      void loadCandidateExamProgress(existing.candidate);
-    } else {
-      setExamProgressReady(true);
-    }
-  }, [loadCandidateExamProgress, refreshData]);
+    const boot = async () => {
+      const persisted = readPersistedState();
+      if (persisted) {
+        setWatchProgress(persisted.watchProgress ?? []);
+        if (persisted.projects?.length) setProjects(persisted.projects);
+        if (persisted.videos?.length) setVideos(persisted.videos);
+        if (persisted.questions?.length) setQuestions(stripQuestionKeys(persisted.questions));
+      }
+      // Exam answers are confidential and must not be restored from the browser cache.
+      setExamProgress([]);
+      clearStoredExamAnswers();
+
+      // Drop idle / closed-tab sessions before hydrating UI
+      let existing = readSession();
+      if (existing && isSessionIdleExpired()) {
+        writeSession(null);
+        existing = null;
+      }
+      setSession(existing);
+      // Re-sync access-role cookie so middleware can enforce path matrix
+      writeSession(existing);
+      setHydrated(true);
+
+      const existingSession = existing;
+      await refreshData({
+        // Candidates need learn/exam payloads; guests/home only need projects + totals
+        includeLearning: existingSession?.kind === "candidate",
+        includeDistricts: false,
+        includeAdminQuestions: false,
+      });
+      if (cancelled) return;
+
+      if (existingSession?.kind === "candidate") {
+        // Ref avoids stale projects from mount-time callback after refreshData
+        await loadCandidateExamProgressRef.current(existingSession.candidate);
+      } else {
+        setExamProgressReady(true);
+      }
+    };
+
+    void boot();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshData]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1115,6 +1214,8 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       loading,
       loadError,
       refreshData,
+      ensureDistrictStats,
+      ensureLearningContent,
       districtStats,
       schoolTotals,
       candidates,
@@ -1176,6 +1277,8 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       deleteProjectQuestion,
       deleteProjectVideo,
       districtStats,
+      ensureDistrictStats,
+      ensureLearningContent,
       examProgress,
       examProgressError,
       examProgressReady,

@@ -42,7 +42,28 @@ export async function fetchProjects(): Promise<LearningProject[]> {
     const supabase = createClient();
     const { data, error } = await supabase
       .from("projects")
-      .select("*")
+      .select(
+        [
+          "id",
+          "name",
+          "description",
+          "is_active",
+          "cover_url",
+          "reg_start",
+          "reg_end",
+          "reg_enabled",
+          "exam_start",
+          "exam_end",
+          "exam_enabled",
+          "enable_results_visibility",
+          "pass_threshold_mode",
+          "pass_threshold_value",
+          "pass_threshold",
+          "max_score",
+          "created_at",
+          "updated_at",
+        ].join(", ")
+      )
       .order("created_at", { ascending: true });
 
     if (error || !data || data.length === 0) {
@@ -57,7 +78,12 @@ export async function fetchProjects(): Promise<LearningProject[]> {
 export async function fetchProjectVideos(projectId?: string): Promise<ProjectVideo[]> {
   try {
     const supabase = createClient();
-    let query = supabase.from("project_videos").select("*").order("order_index", { ascending: true });
+    let query = supabase
+      .from("project_videos")
+      .select(
+        "id, project_id, title, video_url, video_id, is_mandatory, order_index, exam_section_id, created_at"
+      )
+      .order("order_index", { ascending: true });
     if (projectId) {
       query = query.eq("project_id", projectId);
     }
@@ -78,7 +104,12 @@ export async function fetchProjectVideos(projectId?: string): Promise<ProjectVid
 export async function fetchProjectQuestions(projectId?: string): Promise<ProjectQuestion[]> {
   try {
     const supabase = createClient();
-    let query = supabase.from("project_questions").select("*").order("order_index", { ascending: true });
+    let query = supabase
+      .from("project_questions")
+      .select(
+        "id, project_id, question_code, prompt, type, options, image_url, points, order_index, answer_required, section_id"
+      )
+      .order("order_index", { ascending: true });
     if (projectId) {
       query = query.eq("project_id", projectId);
     }

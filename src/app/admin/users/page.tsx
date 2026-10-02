@@ -87,7 +87,7 @@ function UsersContent() {
     setError("");
     try {
       const [rows, exec] = await Promise.all([
-        adminSearchUsers(adminToken, "", 500, includeDeleted),
+        adminSearchUsers(adminToken, "", 100, includeDeleted),
         adminListExecutiveUsers(adminToken, includeDeleted),
       ]);
       setUsers(rows);
