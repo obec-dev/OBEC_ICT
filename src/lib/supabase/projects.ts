@@ -69,7 +69,7 @@ export async function fetchProjects(): Promise<LearningProject[]> {
     if (error || !data || data.length === 0) {
       return MOCK_PROJECTS;
     }
-    return data as LearningProject[];
+    return data as unknown as LearningProject[];
   } catch {
     return MOCK_PROJECTS;
   }
