@@ -9,7 +9,6 @@ import {
   ExamResultsExportPanel,
 } from "@/app/components/AdminReportingPanel";
 import { useIctStore } from "@/contexts/IctStore";
-import { isReportFailed, isReportPassed } from "@/lib/examReports";
 import { getSiteProject } from "@/lib/siteSettings";
 import {
   adminMissionProgressStats,
@@ -145,7 +144,7 @@ function DonutChart({
 }
 
 function OverviewContent() {
-  const { adminToken, projects, examProgress, candidates, logout } = useIctStore();
+  const { adminToken, projects, logout } = useIctStore();
   const [stats, setStats] = useState<AdminOverviewStats | null>(null);
   const [missionStats, setMissionStats] = useState<{
     total_missions: number;
@@ -155,40 +154,59 @@ function OverviewContent() {
   } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const siteProject = useMemo(() => getSiteProject(projects), [projects]);
   const projectId = siteProject?.id;
 
-  useEffect(() => {
+  const loadStats = async (opts?: { soft?: boolean }) => {
     if (!adminToken) return;
-    void adminOverviewStats(adminToken)
-      .then(setStats)
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "โหลดภาพรวมไม่สำเร็จ");
-        if (isAdminUnauthorized(err)) {
-          // Stale localStorage token vs expired/missing admin_sessions row
-          window.setTimeout(() => logout(), 1200);
-        }
-      })
-      .finally(() => setLoading(false));
-    void adminMissionProgressStats(adminToken)
-      .then(setMissionStats)
-      .catch(() => setMissionStats(null));
-  }, [adminToken, logout]);
+    if (opts?.soft) setRefreshing(true);
+    else setLoading(true);
+    setError("");
+    try {
+      const [overview, missions] = await Promise.all([
+        adminOverviewStats(adminToken, projectId),
+        adminMissionProgressStats(adminToken).catch(() => null),
+      ]);
+      setStats(overview);
+      setMissionStats(missions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "โหลดภาพรวมไม่สำเร็จ");
+      if (isAdminUnauthorized(err)) {
+        window.setTimeout(() => logout(), 1200);
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
 
-  const eligible = candidates.length || (stats?.profiles_total ?? 0);
-  const projectExams = examProgress.filter(
-    (e) => !projectId || e.project_id === projectId || !e.project_id
-  );
-  const draftCount = projectExams.filter((e) => e.status === "draft").length;
-  const finishedCount = projectExams.filter((e) => e.status === "submitted").length;
-  const inProgressCount = draftCount;
-  const passedCount = projectExams.filter(isReportPassed).length;
-  const failedCount = projectExams.filter(isReportFailed).length;
+  useEffect(() => {
+    void loadStats();
+    // Re-fetch when returning to the tab so counters stay fresh (no long-lived stale cache)
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadStats({ soft: true });
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when token/project changes
+  }, [adminToken, projectId, logout]);
+
+  // Exam counters MUST come from admin_overview_stats RPC — IctStore.examProgress /
+  // candidates are portal-session only and stay empty for admin logins (always zeros).
+  const eligible = stats?.profiles_total ?? 0;
+  const finishedCount = stats?.exam_submitted ?? 0;
+  const inProgressCount = stats?.exam_draft ?? 0;
+  const partialCount = stats?.exam_partial ?? 0;
+  const passedCount = stats?.exam_passed ?? 0;
+  const failedCount = stats?.exam_failed ?? 0;
   const notTakenCount = Math.max(0, eligible - finishedCount - inProgressCount);
 
   const pct =
-    stats && stats.schools_total > 0 ? Math.round((stats.schools_registered / stats.schools_total) * 100) : 0;
+    stats && stats.schools_total > 0
+      ? Math.round((stats.schools_registered / stats.schools_total) * 100)
+      : 0;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-12 animate-fade-in-up admin-surface">
@@ -201,9 +219,19 @@ function OverviewContent() {
             {siteProject ? siteProject.name : "ติดตามการลงทะเบียนและผลการทดสอบ"}
           </p>
         </div>
-        <Link href="/dashboard" className="text-sm font-bold text-[var(--primary-blue)] dark:text-white underline">
-          เปิดแดชบอร์ดสาธารณะ (รายเขต)
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={loading || refreshing || !adminToken}
+            onClick={() => void loadStats({ soft: true })}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-800 disabled:opacity-40"
+          >
+            {refreshing ? "กำลังรีเฟรช..." : "รีเฟรชสถิติ"}
+          </button>
+          <Link href="/dashboard" className="text-sm font-bold text-[var(--primary-blue)] dark:text-white underline">
+            เปิดแดชบอร์ดสาธารณะ (รายเขต)
+          </Link>
+        </div>
       </div>
 
       {loading && <p className="text-gray-500 mb-4 mt-6">กำลังโหลดสถิติ...</p>}
@@ -291,6 +319,11 @@ function OverviewContent() {
               <StatCard
                 label="กำลังทำข้อสอบ / ฉบับร่าง"
                 value={inProgressCount.toLocaleString()}
+                hint={
+                  partialCount > 0
+                    ? `รวมส่งบางบท ${partialCount.toLocaleString()} คน`
+                    : "สถานะ draft ใน exam_progress"
+                }
                 tone="amber"
               />
               <StatCard

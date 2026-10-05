@@ -474,13 +474,42 @@ export type AdminOverviewStats = {
   watch_total: number;
   exam_submitted: number;
   exam_draft: number;
+  exam_partial: number;
+  exam_passed: number;
+  exam_failed: number;
   exam_total: number;
 };
 
-export async function adminOverviewStats(token: string): Promise<AdminOverviewStats> {
+export async function adminOverviewStats(
+  token: string,
+  projectId?: string
+): Promise<AdminOverviewStats> {
   const supabase = createClient();
-  const { data, error } = await supabase.rpc("admin_overview_stats", { p_token: token });
-  if (error) throw adminRpcFail(error);
+  const { data, error } = await supabase.rpc("admin_overview_stats", {
+    p_token: token,
+    p_project_id: projectId?.trim() || null,
+  });
+  if (error) {
+    // Fallback if 2-arg RPC not deployed yet
+    const legacy = await supabase.rpc("admin_overview_stats", { p_token: token });
+    if (legacy.error) throw adminRpcFail(error);
+    const row = asObj(legacy.data);
+    return {
+      schools_total: Number(row.schools_total) || 0,
+      schools_registered: Number(row.schools_registered) || 0,
+      districts_total: Number(row.districts_total) || 0,
+      profiles_total: Number(row.profiles_total) || 0,
+      profiles_today: Number(row.profiles_today) || 0,
+      watch_completed: Number(row.watch_completed) || 0,
+      watch_total: Number(row.watch_total) || 0,
+      exam_submitted: Number(row.exam_submitted) || 0,
+      exam_draft: Number(row.exam_draft) || 0,
+      exam_partial: Number(row.exam_partial) || 0,
+      exam_passed: Number(row.exam_passed) || 0,
+      exam_failed: Number(row.exam_failed) || 0,
+      exam_total: Number(row.exam_total) || 0,
+    };
+  }
   const row = asObj(data);
   return {
     schools_total: Number(row.schools_total) || 0,
@@ -492,6 +521,9 @@ export async function adminOverviewStats(token: string): Promise<AdminOverviewSt
     watch_total: Number(row.watch_total) || 0,
     exam_submitted: Number(row.exam_submitted) || 0,
     exam_draft: Number(row.exam_draft) || 0,
+    exam_partial: Number(row.exam_partial) || 0,
+    exam_passed: Number(row.exam_passed) || 0,
+    exam_failed: Number(row.exam_failed) || 0,
     exam_total: Number(row.exam_total) || 0,
   };
 }
@@ -640,16 +672,34 @@ export async function adminSearchUsers(
   token: string,
   query: string,
   limit = 50,
-  includeDeleted = false
+  opts: boolean | { includeDeleted?: boolean; onlyDeleted?: boolean } = false
 ): Promise<Candidate[]> {
+  const includeDeleted =
+    typeof opts === "boolean" ? opts : Boolean(opts.includeDeleted || opts.onlyDeleted);
+  const onlyDeleted = typeof opts === "boolean" ? false : Boolean(opts.onlyDeleted);
   const supabase = createClient();
   const { data, error } = await supabase.rpc("admin_search_users", {
     p_token: token,
     p_query: query.trim(),
     p_limit: limit,
     p_include_deleted: includeDeleted,
+    p_only_deleted: onlyDeleted,
   });
-  if (error) throw adminRpcFail(error);
+  if (error) {
+    // Fallback if 5-arg RPC not deployed yet
+    const legacy = await supabase.rpc("admin_search_users", {
+      p_token: token,
+      p_query: query.trim(),
+      p_limit: limit,
+      p_include_deleted: includeDeleted,
+    });
+    if (legacy.error) throw adminRpcFail(error);
+    const rows = Array.isArray(legacy.data) ? legacy.data : [];
+    const mapped = rows.map(mapAdminUserRow);
+    if (onlyDeleted) return mapped.filter((r) => Boolean(r.deleted_at));
+    if (!includeDeleted) return mapped.filter((r) => !r.deleted_at);
+    return mapped;
+  }
   if (!Array.isArray(data)) return [];
   return data.map(mapAdminUserRow);
 }
@@ -808,7 +858,7 @@ export async function adminExportHierarchyRpc(token: string, mode: "district" | 
 export type AdminExportSlice = {
   districtId?: string;
   province?: string;
-  /** Max rows per request (server caps at 5000; default 2000). */
+  /** Max rows per request (server caps at 10000; default 5000). */
   limit?: number;
   offset?: number;
 };
@@ -822,7 +872,7 @@ export async function adminExportParticipantsFullRpc(
     p_token: token,
     p_district_id: opts.districtId?.trim() || null,
     p_province: opts.province?.trim() || null,
-    p_limit: opts.limit ?? 2000,
+    p_limit: opts.limit ?? 5000,
     p_offset: opts.offset ?? 0,
   });
   if (error) throw adminRpcFail(error);
@@ -839,7 +889,7 @@ export async function adminExportRegistrationDetailsRpc(
     p_token: token,
     p_district_id: opts.districtId?.trim() || null,
     p_province: opts.province?.trim() || null,
-    p_limit: opts.limit ?? 2000,
+    p_limit: opts.limit ?? 5000,
     p_offset: opts.offset ?? 0,
   });
   if (error) throw adminRpcFail(error);
@@ -847,15 +897,15 @@ export async function adminExportRegistrationDetailsRpc(
   return data.map((item) => asObj(item));
 }
 
-/** Page through export RPC until a short page is returned (chunked nationwide dump). */
+/** Page through export RPC until a short page is returned (complete nationwide dump). */
 export async function adminExportAllChunks(
   fetchPage: (offset: number, limit: number) => Promise<Record<string, unknown>[]>,
-  chunkSize = 2000,
-  maxRows = 100_000
+  chunkSize = 5000,
+  maxRows = 500_000
 ): Promise<Record<string, unknown>[]> {
   const all: Record<string, unknown>[] = [];
   let offset = 0;
-  const limit = Math.max(1, Math.min(chunkSize, 5000));
+  const limit = Math.max(1, Math.min(chunkSize, 10000));
   while (all.length < maxRows) {
     const page = await fetchPage(offset, limit);
     all.push(...page);

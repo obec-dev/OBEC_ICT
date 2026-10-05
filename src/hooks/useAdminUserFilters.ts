@@ -11,6 +11,7 @@ export type ExecutiveFilters = {
 };
 
 export type CandidateFilters = {
+  memberId: string;
   loginEmail: string;
   name: string;
   schoolId: string;
@@ -33,6 +34,7 @@ const emptyExecutive: ExecutiveFilters = {
 };
 
 const emptyCandidate: CandidateFilters = {
+  memberId: "",
   loginEmail: "",
   name: "",
   schoolId: "",
@@ -98,6 +100,15 @@ export function useCandidateFilters(rows: Candidate[]) {
 
   const filtered = useMemo(() => {
     return rows.filter((row) => {
+      const memberQ = filters.memberId.trim();
+      if (memberQ) {
+        const id = (row.id || "").toLowerCase();
+        const needle = memberQ.toLowerCase();
+        // Exact or prefix/partial match on Member ID (profile_id)
+        if (id !== needle && !id.startsWith(needle) && !id.includes(needle)) {
+          return false;
+        }
+      }
       if (!includes(row.login_email || row.email, filters.loginEmail)) return false;
       if (!includes(row.full_name, filters.name) && !includes(`${row.first_name} ${row.last_name}`, filters.name)) {
         return false;

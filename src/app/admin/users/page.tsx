@@ -40,12 +40,12 @@ function UsersContent() {
   const { adminToken, districtStats } = useIctStore();
   const [districtCatalog, setDistrictCatalog] = useState(districtStats);
   const [activeTab, setActiveTab] = useState<"candidates" | "executives">("candidates");
+  const [candidateView, setCandidateView] = useState<"active" | "deleted">("active");
   const [users, setUsers] = useState<Candidate[]>([]);
   const [executives, setExecutives] = useState<{
     business: ExecutiveUserRow[];
     audit: ExecutiveUserRow[];
   }>({ business: [], audit: [] });
-  const [includeDeleted, setIncludeDeleted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -81,17 +81,32 @@ function UsersContent() {
       .catch(() => setDistrictCatalog([]));
   }, [districtStats]);
 
-  const search = async () => {
+  const search = async (view: "active" | "deleted" = candidateView, query = "") => {
     if (!adminToken) return;
     setLoading(true);
     setError("");
     try {
+      const onlyDeleted = view === "deleted";
       const [rows, exec] = await Promise.all([
-        adminSearchUsers(adminToken, "", 100, includeDeleted),
-        adminListExecutiveUsers(adminToken, includeDeleted),
+        adminSearchUsers(adminToken, query.trim(), 300, {
+          onlyDeleted,
+          includeDeleted: onlyDeleted,
+        }),
+        adminListExecutiveUsers(adminToken, onlyDeleted),
       ]);
-      setUsers(rows);
-      setExecutives(exec);
+      setUsers(
+        onlyDeleted
+          ? rows.filter((r) => Boolean(r.deleted_at))
+          : rows.filter((r) => !r.deleted_at)
+      );
+      setExecutives({
+        business: onlyDeleted
+          ? exec.business.filter((r) => Boolean(r.deleted_at))
+          : exec.business.filter((r) => !r.deleted_at),
+        audit: onlyDeleted
+          ? exec.audit.filter((r) => Boolean(r.deleted_at))
+          : exec.audit.filter((r) => !r.deleted_at),
+      });
       setUserPage(1);
       setExecPage(1);
     } catch (err) {
@@ -101,10 +116,10 @@ function UsersContent() {
     }
   };
 
-  // Initial load only — client filters apply to this cached set; Search reloads from server.
+  // Initial load only — client filters apply to this cached set; Search / view toggle reloads.
   useEffect(() => {
     if (!adminToken) return;
-    void search();
+    void search("active", "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
 
@@ -114,7 +129,7 @@ function UsersContent() {
     setMessage("");
     try {
       await fn();
-      await search();
+      await search(candidateView, "");
     } finally {
       setBusyId(null);
     }
@@ -165,7 +180,7 @@ function UsersContent() {
         setError(res.error);
         return;
       }
-      setMessage("ลบบัญชีแล้ว (เก็บไว้ 30 วัน)");
+      setMessage("ลบบัญชีแล้ว — เปิดแท็บ “ดูผู้ใช้งานที่ถูกระงับ / Soft Delete” เพื่อกู้คืน");
     });
 
   const restore = (u: Candidate) =>
@@ -288,6 +303,23 @@ function UsersContent() {
   const clearExecutiveFilters = () => {
     resetExecFilters();
     setExecPage(1);
+  };
+
+  const buildCandidateSearchQuery = () =>
+    candFilters.memberId.trim() ||
+    [candFilters.loginEmail, candFilters.name].map((s) => s.trim()).filter(Boolean).join(" ") ||
+    "";
+
+  const switchCandidateView = (view: "active" | "deleted") => {
+    if (view === candidateView) return;
+    setCandidateView(view);
+    resetCandFilters();
+    setUserPage(1);
+    void search(view, "");
+  };
+
+  const runCandidateSearch = () => {
+    void search(candidateView, buildCandidateSearchQuery());
   };
 
   const switchTab = (tab: "candidates" | "executives") => {
@@ -729,8 +761,42 @@ function UsersContent() {
 
       {activeTab === "candidates" && (
       <>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => switchCandidateView("active")}
+          className={`rounded-xl px-4 py-2 text-sm font-bold border ${
+            candidateView === "active"
+              ? "bg-[var(--primary-blue)] text-white border-[var(--primary-blue)]"
+              : "bg-white text-slate-700 border-slate-300"
+          }`}
+        >
+          ผู้ใช้งานปกติ
+        </button>
+        <button
+          type="button"
+          onClick={() => switchCandidateView("deleted")}
+          className={`rounded-xl px-4 py-2 text-sm font-bold border ${
+            candidateView === "deleted"
+              ? "bg-amber-600 text-white border-amber-600"
+              : "bg-white text-amber-900 border-amber-300"
+          }`}
+        >
+          ดูผู้ใช้งานที่ถูกระงับ / Soft Delete
+        </button>
+      </div>
+
       <div className="bg-white dark:bg-slate-950 rounded-2xl border border-gray-100 dark:border-slate-700 shadow-sm p-4 mb-4 space-y-3">
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
+          <input
+            className={inputClass}
+            placeholder="ค้นหาหมายเลขสมาชิก..."
+            value={candFilters.memberId}
+            onChange={(e) => {
+              setCandFilters((prev) => ({ ...prev, memberId: e.target.value }));
+              setUserPage(1);
+            }}
+          />
           <input
             className={inputClass}
             placeholder="ค้นหาอีเมลเข้าสู่ระบบ..."
@@ -811,17 +877,9 @@ function UsersContent() {
           </select>
         </div>
         <div className="flex flex-col sm:flex-row gap-3">
-          <label className="flex items-center gap-2 text-sm whitespace-nowrap dark:text-white">
-            <input
-              type="checkbox"
-              checked={includeDeleted}
-              onChange={(e) => setIncludeDeleted(e.target.checked)}
-            />
-            รวมที่ถูกลบ (ยังสามารถกู้คืนได้)
-          </label>
           <button
             type="button"
-            onClick={() => void search()}
+            onClick={runCandidateSearch}
             disabled={loading}
             className="rounded-xl bg-[var(--primary-blue)] text-white px-5 py-2.5 font-bold disabled:opacity-40"
           >
@@ -835,11 +893,16 @@ function UsersContent() {
             ล้างตัวกรองทั้งหมด
           </button>
         </div>
-        <p className="text-xs text-gray-500 dark:text-white/60">          
+        <p className="text-xs text-gray-500 dark:text-white/60">
+          {candidateView === "deleted"
+            ? "กำลังแสดงเฉพาะบัญชีที่ Soft Delete แล้ว — กู้คืนได้จากปุ่มในตาราง"
+            : "กำลังแสดงเฉพาะผู้ใช้งานปกติ (ยังไม่ถูกลบ)"}
         </p>
       </div>
 
-      <h2 className="text-lg font-extrabold dark:text-white mb-3">ผู้ใช้งานทั่วไป</h2>
+      <h2 className="text-lg font-extrabold dark:text-white mb-3">
+        {candidateView === "deleted" ? "บัญชีรอการกู้คืน (Soft Delete)" : "ผู้ใช้งานทั่วไป"}
+      </h2>
       <div className="overflow-x-auto rounded-2xl border border-gray-100 dark:border-slate-700 bg-white dark:bg-slate-950">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50 dark:bg-black text-left dark:text-white">
@@ -856,7 +919,11 @@ function UsersContent() {
             {pagedUsers.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-3 py-8 text-center text-gray-400 dark:text-white/60">
-                  {loading ? "กำลังโหลด..." : "ไม่พบผู้ใช้ — ลองพิมพ์คำค้นหา"}
+                  {loading
+                    ? "กำลังโหลด..."
+                    : candidateView === "deleted"
+                      ? "ไม่พบบัญชีที่ Soft Delete"
+                      : "ไม่พบผู้ใช้ — ลองพิมพ์คำค้นหา"}
                 </td>
               </tr>
             )}
@@ -876,7 +943,12 @@ function UsersContent() {
                       {u.school_id} {u.school_name ? `· ${u.school_name}` : ""}
                     </div>
                     {deleted && (
-                      <span className="text-xs text-amber-600">ลบแล้ว (กู้คืนได้)</span>
+                      <span className="text-xs text-amber-600 block">
+                        Soft Delete
+                        {u.deleted_at
+                          ? ` · ${new Date(u.deleted_at).toLocaleString("th-TH")}`
+                          : ""}
+                      </span>
                     )}
                     {suspended && <span className="text-xs text-red-500">ระงับ</span>}
                   </td>
@@ -1002,7 +1074,7 @@ function UsersContent() {
                           className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-emerald-800 font-bold text-xs disabled:opacity-40"
                           onClick={() => void restore(u)}
                         >
-                          กู้คืน
+                          กู้คืนบัญชี (Restore)
                         </button>
                       )}
                     </div>
