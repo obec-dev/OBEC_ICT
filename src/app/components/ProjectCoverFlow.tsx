@@ -83,11 +83,11 @@ export function ProjectCoverFlow({
     >
       <div className="max-w-4xl mx-auto">
         <article
-          className="relative h-64 md:h-72 rounded-[2rem] overflow-hidden shadow-[0_22px_60px_rgba(17,38,82,0.22)] text-white"
+          className="relative min-h-64 md:min-h-72 rounded-[1.5rem] md:rounded-[2rem] overflow-hidden shadow-[0_22px_60px_rgba(17,38,82,0.22)] text-white"
           style={coverStyle(project, isDark)}
         >
-          <div className="absolute inset-0 p-7 md:p-10 flex flex-col justify-between">
-            <div className="flex flex-wrap gap-2">
+          <div className="relative z-10 p-5 sm:p-7 md:p-10 flex flex-col gap-4 min-h-64 md:min-h-72">
+            <div className="flex flex-wrap gap-2 shrink-0">
               {showPassBadge && (
                 <span className="text-[11px] md:text-xs font-extrabold bg-emerald-500 text-white border border-emerald-300/60 rounded-full px-3 py-1.5 shadow-lg">
                   ✓ ท่านผ่านการทดสอบโครงการนี้แล้ว
@@ -102,14 +102,23 @@ export function ProjectCoverFlow({
                 </span>
               ))}
             </div>
-            <div>
-              <h2 className="text-2xl md:text-3xl font-extrabold leading-snug drop-shadow">{project.name}</h2>
-              {project.description && (
-                <p className="text-sm md:text-base text-white/90 mt-2 max-w-2xl line-clamp-2">{project.description}</p>
-              )}
+
+            <div className="mt-auto flex flex-col gap-3">
+              <div>
+                <h2 className="text-xl sm:text-2xl md:text-3xl font-extrabold leading-snug drop-shadow line-clamp-3 md:line-clamp-none">
+                  {project.name}
+                </h2>
+                {project.description && (
+                  <p className="text-sm md:text-base text-white/90 mt-2 max-w-2xl line-clamp-2">
+                    {project.description}
+                  </p>
+                )}
+              </div>
+
+              {/* Always visible CTA — not clipped by fixed card height on mobile */}
               <Link
                 href={href}
-                className="inline-flex mt-5 rounded-full bg-white text-[var(--primary-blue)] px-6 py-2.5 text-sm font-bold hover:bg-blue-50 transition-colors"
+                className="inline-flex w-full sm:w-auto items-center justify-center shrink-0 rounded-full bg-white text-[var(--primary-blue)] px-6 py-3 text-sm font-bold hover:bg-blue-50 active:scale-[0.98] transition-colors shadow-md"
               >
                 {hasSession
                   ? "เข้าสู่โครงการ"
