@@ -1131,17 +1131,16 @@ export async function upsertExamProgressToDb(input: {
     throw new Error("ไม่พบโครงการ");
   }
   const supabase = createClient();
-  const payload: Record<string, unknown> = {
+  // Always send p_lesson_submissions so PostgREST picks the 6-arg overload
+  // (avoids ambiguity with the legacy 5-arg upsert_exam_progress).
+  const { data, error } = await supabase.rpc("upsert_exam_progress", {
     p_profile_id: profileId,
     p_phone: input.phone,
     p_project_id: input.project_id,
     p_answers: input.answers,
     p_status: input.status,
-  };
-  if (input.lesson_submissions) {
-    payload.p_lesson_submissions = input.lesson_submissions;
-  }
-  const { data, error } = await supabase.rpc("upsert_exam_progress", payload);
+    p_lesson_submissions: input.lesson_submissions ?? {},
+  });
   if (error) throw new Error(error.message);
 
   const row = asRpcObj(data);
