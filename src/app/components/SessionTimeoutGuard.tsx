@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useIctStore } from "@/contexts/IctStore";
-import { loginPathForSession } from "@/lib/auth/sessionLifecycle";
+import {
+  loginPathForSession,
+  SESSION_ACTIVITY_EVENT,
+  touchSessionActivity,
+} from "@/lib/auth/sessionLifecycle";
 
 /** Auto-logout after this many ms of no user interaction. */
 const INACTIVITY_MS = 5 * 60 * 1000;
@@ -17,6 +21,7 @@ const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
 
 /**
  * Ends sessions after 5 minutes of inactivity.
+ * DOM events and video-playback heartbeats (SESSION_ACTIVITY_EVENT) both reset the timer.
  * Shows a Thai security notice; OK redirects to the matching login page.
  */
 export function SessionTimeoutGuard() {
@@ -49,15 +54,24 @@ export function SessionTimeoutGuard() {
     }
 
     armTimer();
-    const onActivity = () => armTimer();
+    const onDomActivity = () => {
+      touchSessionActivity();
+      armTimer();
+    };
+    // Video playback (and other non-DOM activity) already called touchSessionActivity
+    const onExternalActivity = () => armTimer();
+
     for (const evt of ACTIVITY_EVENTS) {
-      window.addEventListener(evt, onActivity, { passive: true });
+      window.addEventListener(evt, onDomActivity, { passive: true });
     }
+    window.addEventListener(SESSION_ACTIVITY_EVENT, onExternalActivity);
+
     return () => {
       clearTimer();
       for (const evt of ACTIVITY_EVENTS) {
-        window.removeEventListener(evt, onActivity);
+        window.removeEventListener(evt, onDomActivity);
       }
+      window.removeEventListener(SESSION_ACTIVITY_EVENT, onExternalActivity);
     };
   }, [armTimer, clearTimer, hydrated, session, showModal]);
 

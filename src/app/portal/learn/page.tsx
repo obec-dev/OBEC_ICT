@@ -12,6 +12,7 @@ import {
   pairVideosWithExamParts,
   sectionAnswerStatus,
 } from "@/lib/lessonExamMap";
+import { touchSessionActivity } from "@/lib/auth/sessionLifecycle";
 import { getSiteProject } from "@/lib/siteSettings";
 import type { ProjectVideo } from "@/types/ict";
 
@@ -115,6 +116,24 @@ function LearnContent() {
 
   const hasStartedSavedRef = useRef(false);
   const hasCompletedSavedRef = useRef(false);
+  /** Keep session alive while YouTube is playing (iframe doesn't bubble DOM events). */
+  const videoActivityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const VIDEO_ACTIVITY_HEARTBEAT_MS = 30_000;
+
+  const stopVideoActivityHeartbeat = () => {
+    if (videoActivityIntervalRef.current) {
+      clearInterval(videoActivityIntervalRef.current);
+      videoActivityIntervalRef.current = null;
+    }
+  };
+
+  const startVideoActivityHeartbeat = () => {
+    touchSessionActivity();
+    stopVideoActivityHeartbeat();
+    videoActivityIntervalRef.current = setInterval(() => {
+      touchSessionActivity();
+    }, VIDEO_ACTIVITY_HEARTBEAT_MS);
+  };
 
   const onVideoStarted = useRef(async () => {
     setSaving(true);
@@ -190,18 +209,24 @@ function LearnContent() {
   }, [saveWatchProgress]);
 
   const onStateChange = useRef((event: { data: number }) => {
+    // YT.PlayerState: ENDED=0, PLAYING=1, PAUSED=2, BUFFERING=3, CUED=5
     if (event.data === 1) {
+      startVideoActivityHeartbeat();
       setVideoStarted(true);
       if (!hasStartedSavedRef.current) {
         hasStartedSavedRef.current = true;
         void onVideoStarted.current();
       }
-    } else if (event.data === 0) {
-      if (!hasCompletedSavedRef.current) {
-        hasCompletedSavedRef.current = true;
-        setVideoCompleted(true);
-        void onVideoCompleted.current();
-      }
+      return;
+    }
+    // Keep heartbeat during BUFFERING (3); stop when paused / ended / cued
+    if (event.data === 2 || event.data === 0 || event.data === 5) {
+      stopVideoActivityHeartbeat();
+    }
+    if (event.data === 0 && !hasCompletedSavedRef.current) {
+      hasCompletedSavedRef.current = true;
+      setVideoCompleted(true);
+      void onVideoCompleted.current();
     }
   });
 
@@ -212,6 +237,7 @@ function LearnContent() {
     let cancelled = false;
 
     const destroyPlayer = () => {
+      stopVideoActivityHeartbeat();
       try {
         playerRef.current?.destroy?.();
       } catch {

@@ -11,6 +11,8 @@ export const AUTH_SESSION_KEY = "ict_platform_session";
 /** Legacy persistent key — cleared whenever found. */
 export const AUTH_SESSION_LEGACY_KEY = "ict_platform_session";
 export const AUTH_ACTIVITY_KEY = "ict_session_activity";
+/** Dispatched whenever activity is touched (DOM or video playback). */
+export const SESSION_ACTIVITY_EVENT = "ict:session-activity";
 
 /** Align with SessionTimeoutGuard inactivity window. */
 export const SESSION_IDLE_LIMIT_MS = 5 * 60 * 1000;
@@ -41,6 +43,11 @@ export function touchSessionActivity() {
     sessionStorage.setItem(AUTH_ACTIVITY_KEY, String(Date.now()));
   } catch {
     /* private mode / quota */
+  }
+  try {
+    window.dispatchEvent(new Event(SESSION_ACTIVITY_EVENT));
+  } catch {
+    /* ignore */
   }
 }
 
