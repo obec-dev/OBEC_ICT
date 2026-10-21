@@ -17,21 +17,27 @@ export function candidateHasPassedExam(
   return Boolean(exam?.passed === true && exam?.graded_at);
 }
 
-/** Missions unlock after a graded pass. Learn/exam stay available until then. */
+/**
+ * Missions unlock after a graded pass — only when the site setting is enabled.
+ * Pass `missionsEnabled` from site_settings (default false until launch).
+ */
 export function candidateCanAccessMissions(
   session: SessionUser | null | undefined,
   examProgress: ExamProgress[],
-  projects: LearningProject[]
+  projects: LearningProject[],
+  missionsEnabled = false
 ): boolean {
+  if (!missionsEnabled) return false;
   return candidateHasPassedExam(session, examProgress, projects);
 }
 
 export function candidatePortalHome(
   session: SessionUser | null | undefined,
   examProgress: ExamProgress[],
-  projects: LearningProject[]
+  projects: LearningProject[],
+  missionsEnabled = false
 ): string {
-  return candidateCanAccessMissions(session, examProgress, projects)
+  return candidateCanAccessMissions(session, examProgress, projects, missionsEnabled)
     ? "/portal/missions"
     : "/portal/learn";
 }

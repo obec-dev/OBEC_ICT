@@ -16,6 +16,7 @@ function ConfigContent() {
   const [heroLine1, setHeroLine1] = useState("");
   const [heroLine2, setHeroLine2] = useState("");
   const [heroDescription, setHeroDescription] = useState("");
+  const [missionsEnabled, setMissionsEnabled] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -33,6 +34,7 @@ function ConfigContent() {
         setHeroLine1(settings.hero_title_line1);
         setHeroLine2(settings.hero_title_line2);
         setHeroDescription(settings.hero_description);
+        setMissionsEnabled(settings.missions_enabled);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "โหลดตั้งค่าไม่สำเร็จ"))
       .finally(() => setLoading(false));
@@ -51,6 +53,7 @@ function ConfigContent() {
       hero_title_line1: heroLine1,
       hero_title_line2: heroLine2,
       hero_description: heroDescription,
+      missions_enabled: missionsEnabled,
     });
     if (!result.ok) {
       setError(result.error);
@@ -96,6 +99,27 @@ function ConfigContent() {
                 onChange={(e) => setAnnounce(e.target.value)}
               />
             </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+            <h2 className="font-bold text-[var(--primary-blue)]">ฟีเจอร์</h2>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-1 accent-[var(--primary-blue)]"
+                checked={missionsEnabled}
+                onChange={(e) => setMissionsEnabled(e.target.checked)}
+              />
+              <span>
+                <span className="block text-sm font-semibold text-[var(--primary-blue)]">
+                  เปิดเมนูภารกิจ (Missions)
+                </span>
+                <span className="block text-xs text-gray-500 mt-1 leading-relaxed">
+                  เมื่อเปิดใช้งาน ผู้ที่สอบผ่านจะเห็นเมนู &quot;ภารกิจ&quot; และเข้าหน้า missions ได้
+                  หากปิดไว้ จะยังคงใช้บทเรียน/แบบทดสอบตามปกติแม้สอบผ่านแล้ว
+                </span>
+              </span>
+            </label>
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">

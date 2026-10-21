@@ -66,7 +66,7 @@ import {
   upsertProjectVideo,
 } from "@/lib/supabase/projects";
 import { MOCK_PROJECTS, MOCK_QUESTIONS, MOCK_VIDEOS } from "@/data/mockProjects";
-import { getSiteProject } from "@/lib/siteSettings";
+import { fetchPublicSiteSettings, getSiteProject } from "@/lib/siteSettings";
 
 function stripQuestionKeys(questions: ProjectQuestion[]): ProjectQuestion[] {
   return questions.map((q) => {
@@ -147,6 +147,8 @@ type IctStoreValue = {
   projects: LearningProject[];
   videos: ProjectVideo[];
   questions: ProjectQuestion[];
+  /** site_settings.missions_enabled — when false, hide missions after exam pass */
+  missionsEnabled: boolean;
   activeProjectId: string;
   setActiveProjectId: (id: string) => void;
   saveProject: (project: LearningProject) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -271,6 +273,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<LearningProject[]>(MOCK_PROJECTS);
   const [videos, setVideos] = useState<ProjectVideo[]>(MOCK_VIDEOS);
   const [questions, setQuestions] = useState<ProjectQuestion[]>(MOCK_QUESTIONS);
+  const [missionsEnabled, setMissionsEnabled] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string>("ict-talent-2026");
   const [session, setSession] = useState<SessionUser | null>(null);
   const districtFetchedAtRef = useRef(0);
@@ -293,14 +296,18 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       const needLearning =
         includeLearning && (force || now - learningFetchedAtRef.current > LEARNING_TTL_MS);
 
-      // Projects + totals are small and needed on most pages (home CTA / schedule).
-      // Soft-fail totals so district dashboard still loads when only totals break.
-      const [totalsResult, projectsResult] = await Promise.allSettled([
+      // Projects + totals + public settings are small and needed on most pages.
+      // Soft-fail totals/settings so district dashboard still loads when only those break.
+      const [totalsResult, projectsResult, settingsResult] = await Promise.allSettled([
         fetchSchoolTotals(),
         fetchProjects(),
+        fetchPublicSiteSettings(),
       ]);
       if (totalsResult.status === "fulfilled") {
         setSchoolTotals(totalsResult.value);
+      }
+      if (settingsResult.status === "fulfilled") {
+        setMissionsEnabled(settingsResult.value.missions_enabled);
       }
       const dbProjects =
         projectsResult.status === "fulfilled" ? projectsResult.value : null;
@@ -1227,6 +1234,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       projects,
       videos,
       questions,
+      missionsEnabled,
       activeProjectId,
       setActiveProjectId,
       saveProject,
@@ -1295,6 +1303,7 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
       loginAdmin,
       logout,
       lookupSchool,
+      missionsEnabled,
       projects,
       questions,
       refreshAdminSession,

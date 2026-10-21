@@ -13,9 +13,10 @@ export function ExamAccessGate({
   mode: "learn-exam" | "missions";
   children: React.ReactNode;
 }) {
-  const { session, examProgress, examProgressReady, projects, hydrated } = useIctStore();
+  const { session, examProgress, examProgressReady, projects, hydrated, missionsEnabled } =
+    useIctStore();
   const router = useRouter();
-  const passed = candidateCanAccessMissions(session, examProgress, projects);
+  const passed = candidateCanAccessMissions(session, examProgress, projects, missionsEnabled);
 
   useEffect(() => {
     if (!hydrated || !examProgressReady || session?.kind !== "candidate") return;

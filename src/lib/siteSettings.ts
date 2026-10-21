@@ -13,6 +13,8 @@ export type SitePeriodSettings = {
   hero_title_line1: string;
   hero_title_line2: string;
   hero_description: string;
+  /** When false, hide missions menu and keep learn/exam after pass. Default off until launch. */
+  missions_enabled: boolean;
 };
 
 export type PeriodStatus = {
@@ -71,6 +73,8 @@ export function parseSiteSettings(raw: Record<string, unknown>): SitePeriodSetti
     hero_description:
       asString(raw.hero_description) ||
       "แพลตฟอร์มลงทะเบียน เรียนรู้ และสอบคัดเลือกผู้แทนเทคโนโลยีสารสนเทศของโรงเรียน ครอบคลุมเขตพื้นที่การศึกษาทั่วประเทศ",
+    // Default false — feature not launched yet
+    missions_enabled: asBool(raw.missions_enabled, false),
   };
 }
 

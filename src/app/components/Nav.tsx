@@ -14,14 +14,14 @@ const BRAND_LOGO = "/OBEC_ICT_Logo.jpg";
 type NavItem = { href: string; label: string };
 
 export function Nav() {
-  const { session, isAdmin, examProgress, projects } = useIctStore();
+  const { session, isAdmin, examProgress, projects, missionsEnabled } = useIctStore();
   const [menuOpen, setMenuOpen] = useState(false);
   const isLoggedIn = Boolean(session);
   const accessRole = accessRoleFromSession(session);
   const isCandidate = accessRole === "user" || accessRole === "school_admin";
   const showMissions = useMemo(
-    () => candidateCanAccessMissions(session, examProgress, projects),
-    [session, examProgress, projects]
+    () => candidateCanAccessMissions(session, examProgress, projects, missionsEnabled),
+    [session, examProgress, projects, missionsEnabled]
   );
   const showLearnExam = isCandidate && !showMissions;
 
