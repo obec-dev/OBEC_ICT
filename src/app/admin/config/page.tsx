@@ -16,7 +16,7 @@ function ConfigContent() {
   const [heroLine1, setHeroLine1] = useState("");
   const [heroLine2, setHeroLine2] = useState("");
   const [heroDescription, setHeroDescription] = useState("");
-  const [missionsEnabled, setMissionsEnabled] = useState(false);
+  const [auditorCanApprove, setAuditorCanApprove] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -34,7 +34,7 @@ function ConfigContent() {
         setHeroLine1(settings.hero_title_line1);
         setHeroLine2(settings.hero_title_line2);
         setHeroDescription(settings.hero_description);
-        setMissionsEnabled(settings.missions_enabled);
+        setAuditorCanApprove(settings.auditor_can_approve_reports);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "โหลดตั้งค่าไม่สำเร็จ"))
       .finally(() => setLoading(false));
@@ -53,7 +53,7 @@ function ConfigContent() {
       hero_title_line1: heroLine1,
       hero_title_line2: heroLine2,
       hero_description: heroDescription,
-      missions_enabled: missionsEnabled,
+      auditor_can_approve_reports: auditorCanApprove,
     });
     if (!result.ok) {
       setError(result.error);
@@ -67,7 +67,7 @@ function ConfigContent() {
       <AdminNav />
       <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">ตั้งค่าเว็บไซต์</h1>
       <p className="text-gray-500 mb-6">
-        กำหนดชื่อระบบ ข้อความประกาศ และข้อความ Hero หน้าแรก · กำหนดการลงทะเบียน/สอบจัดการที่เมนูโครงการ
+        กำหนดชื่อระบบ ข้อความประกาศ Hero และการตั้งค่า Auditor · กำหนดการลงทะเบียน/สอบจัดการที่เมนูโครงการ
       </p>
 
       {loading ? (
@@ -99,27 +99,6 @@ function ConfigContent() {
                 onChange={(e) => setAnnounce(e.target.value)}
               />
             </div>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
-            <h2 className="font-bold text-[var(--primary-blue)]">ฟีเจอร์</h2>
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                className="mt-1 accent-[var(--primary-blue)]"
-                checked={missionsEnabled}
-                onChange={(e) => setMissionsEnabled(e.target.checked)}
-              />
-              <span>
-                <span className="block text-sm font-semibold text-[var(--primary-blue)]">
-                  เปิดเมนูภารกิจ (Missions)
-                </span>
-                <span className="block text-xs text-gray-500 mt-1 leading-relaxed">
-                  เมื่อเปิดใช้งาน ผู้ที่สอบผ่านจะเห็นเมนู &quot;ภารกิจ&quot; และเข้าหน้า missions ได้
-                  หากปิดไว้ จะยังคงใช้บทเรียน/แบบทดสอบตามปกติแม้สอบผ่านแล้ว
-                </span>
-              </span>
-            </label>
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
@@ -161,6 +140,26 @@ function ConfigContent() {
                 onChange={(e) => setHeroDescription(e.target.value)}
               />
             </div>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
+            <h2 className="font-bold text-[var(--primary-blue)]">กิจกรรม / Auditor</h2>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-1 accent-[var(--primary-blue)]"
+                checked={auditorCanApprove}
+                onChange={(e) => setAuditorCanApprove(e.target.checked)}
+              />
+              <span>
+                <span className="block text-sm font-semibold text-[var(--primary-blue)]">
+                  อนุญาตให้ Auditor อนุมัติรายงาน
+                </span>
+                <span className="block text-xs text-gray-500 mt-1 leading-relaxed">
+                  เปิด: Auditor และ Admin อนุมัติได้ · ปิด: เฉพาะ Admin อนุมัติได้ (Auditor ไม่เห็นคิวอนุมัติ)
+                </span>
+              </span>
+            </label>
           </div>
 
           {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}

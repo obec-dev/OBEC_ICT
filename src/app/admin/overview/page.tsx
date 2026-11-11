@@ -11,9 +11,11 @@ import {
 import { useIctStore } from "@/contexts/IctStore";
 import { getSiteProject } from "@/lib/siteSettings";
 import {
+  adminActivityOverviewStats,
   adminMissionProgressStats,
   adminOverviewStats,
   isAdminUnauthorized,
+  type AdminActivityOverviewStats,
   type AdminOverviewStats,
 } from "@/lib/supabase/admin";
 
@@ -152,6 +154,7 @@ function OverviewContent() {
     completed_pairs: number;
     avg_completed_per_user: number;
   } | null>(null);
+  const [activityStats, setActivityStats] = useState<AdminActivityOverviewStats | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -165,12 +168,14 @@ function OverviewContent() {
     else setLoading(true);
     setError("");
     try {
-      const [overview, missions] = await Promise.all([
+      const [overview, missions, activity] = await Promise.all([
         adminOverviewStats(adminToken, projectId),
         adminMissionProgressStats(adminToken).catch(() => null),
+        adminActivityOverviewStats(adminToken).catch(() => null),
       ]);
       setStats(overview);
       setMissionStats(missions);
+      setActivityStats(activity);
     } catch (err) {
       setError(err instanceof Error ? err.message : "โหลดภาพรวมไม่สำเร็จ");
       if (isAdminUnauthorized(err)) {
@@ -298,6 +303,101 @@ function OverviewContent() {
                   value={`${missionStats.avg_completed_per_user}/${missionStats.total_missions || 0}`}
                   hint="Missions Completed (avg)"
                   tone="amber"
+                />
+              </div>
+            </section>
+          )}
+
+          {activityStats && (
+            <section className="mb-12">
+              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-extrabold text-[var(--primary-blue)] dark:text-white mb-1">
+                    กิจกรรมและคะแนน
+                  </h2>
+                  <p className="text-xs text-gray-500 dark:text-white/70">
+                    คะแนนรวม · Live check-in · ภารกิจรายงาน (Activity tasks)
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-3 text-sm font-bold">
+                  <Link href="/admin/activities" className="underline text-[var(--primary-blue)]">
+                    กิจกรรมและคะแนน →
+                  </Link>
+                  <Link href="/admin/e-learning" className="underline text-[var(--primary-blue)]">
+                    E-learning →
+                  </Link>
+                </div>
+              </div>
+
+              <h3 className="text-sm font-bold text-gray-600 mb-2">คะแนน</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                <StatCard
+                  label="คะแนนรวมที่ออก"
+                  value={activityStats.points_total.toLocaleString()}
+                  tone="blue"
+                />
+                <StatCard
+                  label="ผู้ใช้ที่มีคะแนน"
+                  value={activityStats.users_with_score.toLocaleString()}
+                  tone="green"
+                />
+                <StatCard
+                  label="จากภารกิจ / Live"
+                  value={(
+                    (activityStats.points_by_source.task || 0) +
+                    (activityStats.points_by_source.live || 0)
+                  ).toLocaleString()}
+                  hint={`task ${activityStats.points_by_source.task || 0} · live ${activityStats.points_by_source.live || 0}`}
+                  tone="amber"
+                />
+                <StatCard
+                  label="E-learn / ปรับโดย Admin"
+                  value={(
+                    (activityStats.points_by_source.self_learn || 0) +
+                    (activityStats.points_by_source.elearning || 0) +
+                    (activityStats.points_by_source.manual || 0)
+                  ).toLocaleString()}
+                  hint={`self_learn ${activityStats.points_by_source.self_learn || 0} · manual ${activityStats.points_by_source.manual || 0}`}
+                  tone="gray"
+                />
+              </div>
+
+              <h3 className="text-sm font-bold text-gray-600 mb-2">Live check-in</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                <StatCard label="Live ที่เปิดใช้งาน" value={activityStats.live_active} tone="blue" />
+                <StatCard label="อยู่ในช่วง check-in" value={activityStats.live_in_window} tone="green" />
+                <StatCard
+                  label="Check-in ทั้งหมด"
+                  value={activityStats.live_checkins_total.toLocaleString()}
+                  tone="gray"
+                />
+                <StatCard
+                  label="Check-in วันนี้"
+                  value={activityStats.live_checkins_today.toLocaleString()}
+                  tone="amber"
+                />
+              </div>
+
+              <h3 className="text-sm font-bold text-gray-600 mb-2">ระบบภารกิจ (Activity tasks)</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <StatCard label="ภารกิจที่เปิด" value={activityStats.tasks_open} tone="blue" />
+                <StatCard
+                  label="รออนุมัติ"
+                  value={activityStats.submissions_pending.toLocaleString()}
+                  tone="amber"
+                />
+                <StatCard
+                  label="อนุมัติแล้ว"
+                  value={activityStats.submissions_approved.toLocaleString()}
+                  tone="green"
+                />
+                <StatCard
+                  label="ฉบับร่าง / อื่นๆ"
+                  value={(
+                    activityStats.submissions_draft + activityStats.submissions_rejected
+                  ).toLocaleString()}
+                  hint={`draft ${activityStats.submissions_draft} · rejected ${activityStats.submissions_rejected}`}
+                  tone="gray"
                 />
               </div>
             </section>

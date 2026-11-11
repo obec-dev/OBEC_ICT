@@ -239,6 +239,140 @@ export type ProjectVideo = {
   order_index?: number;
   /** Explicit 1:1 link to exam_sections.id (preferred over order pairing) */
   exam_section_id?: string | null;
+  /** Points credited once when watch is completed */
+  score_points?: number;
+  created_at?: string;
+};
+
+export type ActivitySubmissionStatus =
+  | "not_submitted"
+  | "draft"
+  | "pending"
+  | "approved"
+  /** @deprecated mapped to draft after activity_draft_notify_v1 */
+  | "rejected";
+
+export type AppNotification = {
+  id: string;
+  title: string;
+  body: string;
+  kind: string;
+  link_path?: string | null;
+  meta?: Record<string, unknown>;
+  created_at: string;
+  read_at?: string | null;
+  is_unread: boolean;
+};
+
+export type NewsImage = {
+  id?: string;
+  image_url: string;
+  caption?: string | null;
+  sort_order?: number;
+};
+
+export type NewsListItem = {
+  id: string;
+  slug: string;
+  title: string;
+  summary?: string | null;
+  hero_image_url?: string | null;
+  hashtags: string[];
+  published_at?: string | null;
+  sort_order: number;
+  is_published?: boolean;
+  image_count?: number;
+  updated_at?: string;
+};
+
+export type NewsArticle = NewsListItem & {
+  body: string;
+  images: NewsImage[];
+};
+
+export type ActivityProject = {
+  id: string;
+  name: string;
+  created_at?: string;
+};
+
+export type ActivityTask = {
+  id: string;
+  activity_project_id?: string | null;
+  activity_project_name?: string | null;
+  /** @deprecated learning project id — unused for new tasks */
+  project_id?: string;
+  project_name?: string | null;
+  report_name: string;
+  report_detail?: string | null;
+  report_deadline?: string | null;
+  include_report_name?: boolean;
+  include_detail?: boolean;
+  include_deadline?: boolean;
+  include_video_url?: boolean;
+  include_doc_url?: boolean;
+  link_required?: boolean;
+  file_required?: boolean;
+  score_points: number;
+  is_open: boolean;
+  activity_year: number;
+  submission_status?: ActivitySubmissionStatus;
+  submitted_report_name?: string | null;
+  submitted_report_detail?: string | null;
+  video_url?: string | null;
+  doc_url?: string | null;
+  report_url?: string | null;
+  file_path?: string | null;
+  file_name?: string | null;
+  submitted_at?: string | null;
+  reviewer_note?: string | null;
+  submission_count?: number;
+  approved_count?: number;
+  pending_count?: number;
+};
+
+export type LiveMeeting = {
+  id: string;
+  title: string;
+  youtube_url: string;
+  window_start: string;
+  window_end: string;
+  score_points: number;
+  is_active: boolean;
+  in_window?: boolean;
+  checked_in?: boolean;
+  checked_in_at?: string | null;
+};
+
+export type ScoreRankRow = {
+  rank: number;
+  profile_id: string;
+  first_name?: string;
+  last_name?: string;
+  school_name?: string | null;
+  total_score: number;
+  is_me?: boolean;
+};
+
+export type ActivityHub = {
+  total_score: number;
+  activity_year: number;
+  tasks_total: number;
+  tasks_approved: number;
+  performance_pct: number;
+  school_name?: string | null;
+  district_id?: string | null;
+  district_name?: string | null;
+  tasks: ActivityTask[];
+  live_meetings: LiveMeeting[];
+};
+
+export type AuditorDocument = {
+  id: string;
+  district_id?: string;
+  title: string;
+  file_url?: string | null;
+  file_path?: string | null;
   created_at?: string;
 };
 

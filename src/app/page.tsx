@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { LiveMeetingLanding } from "@/app/components/LiveMeetingLanding";
+import { NewsCarousel } from "@/app/components/NewsCarousel";
 import { ProjectCoverFlow } from "@/app/components/ProjectCoverFlow";
 import { ProjectScheduleNotice } from "@/app/components/ProjectScheduleNotice";
 import { useIctStore, useSchoolStats } from "@/contexts/IctStore";
@@ -149,7 +151,13 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 3. Project carousel */}
+      {/* 3. Live meeting (active / upcoming — hidden when none) */}
+      <LiveMeetingLanding />
+
+      {/* 4. News carousel */}
+      <NewsCarousel />
+
+      {/* 4. Project carousel */}
       {hydrated && (
         <ProjectCoverFlow projects={projects} hasSession={Boolean(session && session.kind === "candidate")} />
       )}
@@ -157,46 +165,6 @@ export default function Home() {
       {/* 4. Schedule timeline */}
       {hydrated && <ProjectScheduleNotice projects={projects} />}
 
-      {/* 5. Registration steps */}
-      <section
-        className="max-w-7xl mx-auto px-4 py-16 text-center animate-fade-in-up"
-        style={{ animationDelay: "0.4s", animationFillMode: "both" }}
-      >
-        <h2 className="text-3xl font-bold text-[var(--primary-blue)] mb-4">ขั้นตอนการคัดเลือก</h2>
-        <p className="text-gray-500 dark:text-slate-400 mb-12">
-          ลงทะเบียนและตรวจสอบกำหนดการเพื่อเข้าร่วมการทดสอบคัดเลือก
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          {[
-            { step: "1", title: "ยินยอมเงื่อนไข", desc: "อ่านข้อกำหนดและให้ความยินยอมตาม PDPA ก่อนกรอกข้อมูล" },
-            {
-              step: "2",
-              title: "ลงทะเบียนด้วยรหัสโรงเรียน",
-              desc: "ระบบดึงชื่อโรงเรียน เขต และจังหวัดให้อัตโนมัติ แล้วสร้างบัญชีเข้าพอร์ทัล",
-            },
-            { step: "3", title: "เรียนจากวิดีโอ", desc: "รับชมบทเรียน ICT ให้ครบ เพื่อปลดล็อกสิทธิ์เข้าสอบ" },
-            {
-              step: "4",
-              title: "สอบคัดเลือก",
-              desc: "ตอบข้อสอบแบบบันทึกฉบับร่างได้ จนกว่าจะส่งคำตอบสุดท้าย",
-            },
-          ].map((item) => (
-            <div
-              key={item.step}
-              className="group bg-white p-8 rounded-2xl shadow-sm border border-gray-100 hover:shadow-[0_20px_40px_rgba(0,0,0,0.08)] transition-all duration-300 hover:-translate-y-3"
-            >
-              <div className="w-16 h-16 bg-blue-50 text-[var(--secondary-blue)] rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-6 group-hover:scale-110 group-hover:bg-[var(--primary-blue)] group-hover:text-white transition-all duration-300">
-                {item.step}
-              </div>
-              <h3 className="text-xl font-bold text-gray-800 mb-3 group-hover:text-[var(--primary-blue)] transition-colors">
-                {item.title}
-              </h3>
-              <p className="text-gray-500 text-sm leading-relaxed">{item.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

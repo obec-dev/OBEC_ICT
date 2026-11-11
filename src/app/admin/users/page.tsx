@@ -5,7 +5,10 @@ import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
 import {
+  adminAdjustScore,
   adminListExecutiveUsers,
+  adminListScoreAdjustments,
+  adminProfileScores,
   adminResetExecutiveTempPasswordRpc,
   adminRestoreExecutiveRpc,
   adminRestoreUserRpc,
@@ -21,7 +24,9 @@ import {
   adminUpsertBusinessUserRpc,
   generateTempPassword,
   type ExecutiveUserRow,
+  type ScoreAdjustmentRow,
 } from "@/lib/supabase/admin";
+import { formatDateTimeTh } from "@/lib/siteSettings";
 import { Combobox } from "@/app/components/Combobox";
 import { TablePagination, paginateSlice } from "@/app/components/TablePagination";
 import { useCandidateFilters, useExecutiveFilters } from "@/hooks/useAdminUserFilters";
@@ -71,6 +76,15 @@ function UsersContent() {
   const [userPage, setUserPage] = useState(1);
   const [execPage, setExecPage] = useState(1);
 
+  const [scoreEditId, setScoreEditId] = useState<string | null>(null);
+  const [scorePoints, setScorePoints] = useState("10");
+  const [scoreMode, setScoreMode] = useState<"topup" | "deduct">("topup");
+  const [scoreRemark, setScoreRemark] = useState("");
+  const [scoreUserComment, setScoreUserComment] = useState("");
+  const [scoreNotify, setScoreNotify] = useState(true);
+  const [scoreHistory, setScoreHistory] = useState<ScoreAdjustmentRow[]>([]);
+  const [scoreByProfile, setScoreByProfile] = useState<Record<string, number>>({});
+
   useEffect(() => {
     if (districtStats.length > 0) {
       setDistrictCatalog(districtStats);
@@ -94,11 +108,10 @@ function UsersContent() {
         }),
         adminListExecutiveUsers(adminToken, onlyDeleted),
       ]);
-      setUsers(
-        onlyDeleted
-          ? rows.filter((r) => Boolean(r.deleted_at))
-          : rows.filter((r) => !r.deleted_at)
-      );
+      const nextUsers = onlyDeleted
+        ? rows.filter((r) => Boolean(r.deleted_at))
+        : rows.filter((r) => !r.deleted_at);
+      setUsers(nextUsers);
       setExecutives({
         business: onlyDeleted
           ? exec.business.filter((r) => Boolean(r.deleted_at))
@@ -109,6 +122,12 @@ function UsersContent() {
       });
       setUserPage(1);
       setExecPage(1);
+      try {
+        const ids = nextUsers.map((u) => u.id).filter(Boolean);
+        setScoreByProfile(ids.length ? await adminProfileScores(adminToken, ids) : {});
+      } catch {
+        setScoreByProfile({});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "ค้นหาไม่สำเร็จ");
     } finally {
@@ -192,6 +211,64 @@ function UsersContent() {
         return;
       }
       setMessage("กู้คืนบัญชีแล้ว");
+    });
+
+  const openScoreAdjust = async (u: Candidate) => {
+    if (!adminToken) return;
+    setScoreEditId(u.id);
+    setScorePoints("10");
+    setScoreMode("topup");
+    setScoreRemark("");
+    setScoreUserComment("");
+    setScoreNotify(true);
+    setRoleEditId(null);
+    setEmailEditId(null);
+    try {
+      const [history, scores] = await Promise.all([
+        adminListScoreAdjustments(adminToken, u.id, 10),
+        adminProfileScores(adminToken, [u.id]),
+      ]);
+      setScoreHistory(history.slice(0, 10));
+      setScoreByProfile((prev) => ({ ...prev, ...scores }));
+    } catch {
+      setScoreHistory([]);
+    }
+  };
+
+  const saveScoreAdjust = (u: Candidate) =>
+    withBusy(u.id, async () => {
+      if (!adminToken) return;
+      const abs = Math.abs(Number(scorePoints) || 0);
+      if (!abs) {
+        setError("คะแนนต้องไม่เป็น 0");
+        return;
+      }
+      if (!scoreRemark.trim()) {
+        setError("กรุณาระบุความคิดเห็นแอดมิน");
+        return;
+      }
+      const points = scoreMode === "deduct" ? -abs : abs;
+      const res = await adminAdjustScore(
+        adminToken,
+        u.id,
+        points,
+        scoreRemark.trim(),
+        scoreNotify,
+        scoreNotify ? scoreUserComment : undefined
+      );
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setMessage(
+        points > 0
+          ? `เติมคะแนน +${points} ให้ ${u.full_name || u.id} แล้ว`
+          : `หักคะแนน ${points} จาก ${u.full_name || u.id} แล้ว`
+      );
+      setScoreByProfile((prev) => ({ ...prev, [u.id]: res.total_score }));
+      setScoreHistory((await adminListScoreAdjustments(adminToken, u.id, 10)).slice(0, 10));
+      setScoreRemark("");
+      setScoreUserComment("");
     });
 
   const createSpecial = async () => {
@@ -912,13 +989,14 @@ function UsersContent() {
               <th className="px-3 py-3 font-semibold">โทร</th>
               <th className="px-3 py-3 font-semibold">อีเมลเข้าสู่ระบบ</th>
               <th className="px-3 py-3 font-semibold">บทบาท</th>
+              <th className="px-3 py-3 font-semibold">คะแนน</th>
               <th className="px-3 py-3 font-semibold">จัดการ</th>
             </tr>
           </thead>
           <tbody>
             {pagedUsers.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-gray-400 dark:text-white/60">
+                <td colSpan={7} className="px-3 py-8 text-center text-gray-400 dark:text-white/60">
                   {loading
                     ? "กำลังโหลด..."
                     : candidateView === "deleted"
@@ -1023,6 +1101,9 @@ function UsersContent() {
                       <span className="font-mono text-xs">{ROLE_LABELS[role]}</span>
                     )}
                   </td>
+                  <td className="px-3 py-3 tabular-nums font-semibold whitespace-nowrap">
+                    {scoreByProfile[u.id] ?? 0}
+                  </td>
                   <td className="px-3 py-3 whitespace-nowrap">
                     <div className="flex flex-row flex-wrap items-center gap-2">
                       {!deleted && (
@@ -1034,6 +1115,7 @@ function UsersContent() {
                               setRoleEditId(u.id);
                               setRoleDraft(role);
                               setEmailEditId(null);
+                              setScoreEditId(null);
                             }}
                           >
                             จัดการ Role
@@ -1045,9 +1127,17 @@ function UsersContent() {
                               setEmailEditId(u.id);
                               setEmailDraft(u.login_email || u.email || "");
                               setRoleEditId(null);
+                              setScoreEditId(null);
                             }}
                           >
                             แก้ไข Login ID
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-emerald-900 font-bold text-xs"
+                            onClick={() => void openScoreAdjust(u)}
+                          >
+                            ปรับคะแนน
                           </button>
                           <button
                             type="button"
@@ -1093,6 +1183,169 @@ function UsersContent() {
       />
       </>
       )}
+
+      {scoreEditId && (() => {
+        const scoreUser = users.find((u) => u.id === scoreEditId);
+        if (!scoreUser) return null;
+        return (
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="score-adjust-title"
+          >
+            <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-950 p-5 shadow-xl space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3
+                    id="score-adjust-title"
+                    className="text-lg font-extrabold text-[var(--primary-blue)] dark:text-white"
+                  >
+                    ปรับคะแนน
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                    {scoreUser.full_name || scoreUser.id}
+                  </p>
+                  <p className="text-sm font-bold mt-1">
+                    คะแนนปัจจุบัน:{" "}
+                    <span className="tabular-nums text-[var(--primary-blue)]">
+                      {scoreByProfile[scoreUser.id] ?? 0}
+                    </span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-lg border px-3 py-1.5 text-xs font-bold"
+                  onClick={() => setScoreEditId(null)}
+                >
+                  ปิด
+                </button>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-bold ${
+                    scoreMode === "topup"
+                      ? "bg-emerald-600 text-white"
+                      : "bg-gray-50 border text-gray-700 dark:bg-slate-900 dark:text-gray-100"
+                  }`}
+                  onClick={() => setScoreMode("topup")}
+                >
+                  เติมคะแนน
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-bold ${
+                    scoreMode === "deduct"
+                      ? "bg-red-600 text-white"
+                      : "bg-gray-50 border text-gray-700 dark:bg-slate-900 dark:text-gray-100"
+                  }`}
+                  onClick={() => setScoreMode("deduct")}
+                >
+                  หักคะแนน
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-1">จำนวนคะแนน</label>
+                <input
+                  type="number"
+                  min={1}
+                  className={inputClass}
+                  value={scorePoints}
+                  onChange={(e) => setScorePoints(e.target.value)}
+                  placeholder="เช่น 10"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-1">
+                  ความคิดเห็นแอดมิน <span className="text-[var(--accent-red)]">*</span>
+                </label>
+                <textarea
+                  className={`${inputClass} min-h-[96px] resize-y`}
+                  rows={4}
+                  value={scoreRemark}
+                  onChange={(e) => setScoreRemark(e.target.value)}
+                  placeholder="บังคับ — เหตุผลภายในสำหรับแอดมิน (ผู้ใช้ไม่เห็น)"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  checked={scoreNotify}
+                  onChange={(e) => setScoreNotify(e.target.checked)}
+                />
+                แจ้งเตือนผู้ใช้
+              </label>
+
+              {scoreNotify && (
+                <div>
+                  <label className="block text-sm font-semibold mb-1">ข้อความถึงผู้ใช้ (ไม่บังคับ)</label>
+                  <textarea
+                    className={`${inputClass} min-h-[72px] resize-y`}
+                    rows={3}
+                    value={scoreUserComment}
+                    onChange={(e) => setScoreUserComment(e.target.value)}
+                    placeholder="ข้อความนี้จะแสดงในการแจ้งเตือน (ไม่รวมความคิดเห็นแอดมิน)"
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={busyId === scoreUser.id}
+                  onClick={() => void saveScoreAdjust(scoreUser)}
+                  className="rounded-full bg-[var(--primary-blue)] text-white px-5 py-2.5 text-sm font-bold disabled:opacity-40"
+                >
+                  บันทึกการปรับคะแนน
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScoreEditId(null)}
+                  className="rounded-full border px-5 py-2.5 text-sm font-bold"
+                >
+                  ยกเลิก
+                </button>
+              </div>
+
+              <div className="pt-3 border-t border-gray-100 dark:border-slate-800 space-y-1.5">
+                <div className="text-xs font-bold text-gray-500">ประวัติล่าสุด (10 รายการ)</div>
+                {scoreHistory.length === 0 && (
+                  <p className="text-xs text-gray-400">ยังไม่มีประวัติการปรับคะแนน</p>
+                )}
+                {scoreHistory.slice(0, 10).map((h) => (
+                  <div
+                    key={h.id}
+                    className="rounded-lg border border-gray-100 dark:border-slate-800 px-3 py-2 text-xs text-gray-600 dark:text-gray-300"
+                  >
+                    <div className="flex flex-wrap justify-between gap-2">
+                      <span
+                        className={
+                          h.points > 0 ? "text-emerald-700 font-bold" : "text-red-700 font-bold"
+                        }
+                      >
+                        {h.points > 0 ? `+${h.points}` : h.points}
+                      </span>
+                      <span className="text-gray-400">{formatDateTimeTh(h.created_at)}</span>
+                    </div>
+                    <div className="mt-1 break-words">
+                      <span className="font-semibold text-gray-500">ความคิดเห็นแอดมิน:</span>{" "}
+                      {h.remark}
+                    </div>
+                    {h.notify_user && (
+                      <div className="mt-0.5 text-gray-400">แจ้งเตือนผู้ใช้แล้ว</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

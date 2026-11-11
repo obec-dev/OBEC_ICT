@@ -30,6 +30,10 @@ import {
   upsertWatchProgressToDb,
 } from "@/lib/supabase/data";
 import {
+  fetchPublicBootstrap,
+  PUBLIC_BOOTSTRAP_TTL_MS,
+} from "@/lib/supabase/bootstrap";
+import {
   clearStoredExamAnswers,
   readPersistedState,
   readSession,
@@ -59,14 +63,13 @@ import {
   deleteProjectQuestionDb,
   deleteProjectVideoDb,
   fetchPublicExamQuestions,
-  fetchProjects,
   fetchProjectVideos,
   upsertProject,
   upsertProjectQuestion,
   upsertProjectVideo,
 } from "@/lib/supabase/projects";
 import { MOCK_PROJECTS, MOCK_QUESTIONS, MOCK_VIDEOS } from "@/data/mockProjects";
-import { fetchPublicSiteSettings, getSiteProject } from "@/lib/siteSettings";
+import { getSiteProject } from "@/lib/siteSettings";
 
 function stripQuestionKeys(questions: ProjectQuestion[]): ProjectQuestion[] {
   return questions.map((q) => {
@@ -278,8 +281,12 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<SessionUser | null>(null);
   const districtFetchedAtRef = useRef(0);
   const learningFetchedAtRef = useRef(0);
+  const coreFetchedAtRef = useRef(0);
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
   const DISTRICT_TTL_MS = 10 * 60 * 1000;
   const LEARNING_TTL_MS = 5 * 60 * 1000;
+  const CORE_TTL_MS = PUBLIC_BOOTSTRAP_TTL_MS;
 
   const refreshData = useCallback(async (opts?: RefreshDataOpts) => {
     const includeDistricts = opts?.includeDistricts === true;
@@ -295,27 +302,33 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         includeDistricts && (force || now - districtFetchedAtRef.current > DISTRICT_TTL_MS);
       const needLearning =
         includeLearning && (force || now - learningFetchedAtRef.current > LEARNING_TTL_MS);
+      const needCore = force || now - coreFetchedAtRef.current > CORE_TTL_MS;
 
-      // Projects + totals + public settings are small and needed on most pages.
-      // Soft-fail totals/settings so district dashboard still loads when only those break.
-      const [totalsResult, projectsResult, settingsResult] = await Promise.allSettled([
-        fetchSchoolTotals(),
-        fetchProjects(),
-        fetchPublicSiteSettings(),
-      ]);
-      if (totalsResult.status === "fulfilled") {
-        setSchoolTotals(totalsResult.value);
-      }
-      if (settingsResult.status === "fulfilled") {
-        setMissionsEnabled(settingsResult.value.missions_enabled);
-      }
-      const dbProjects =
-        projectsResult.status === "fulfilled" ? projectsResult.value : null;
-      if (dbProjects?.length) setProjects(dbProjects);
-      if (projectsResult.status === "rejected" && !includeDistricts) {
-        throw projectsResult.reason instanceof Error
-          ? projectsResult.reason
-          : new Error("โหลดโครงการไม่สำเร็จ");
+      // One RPC (cached) instead of GET site_settings + GET projects + totals.
+      let dbProjects: LearningProject[] | null = null;
+      if (needCore) {
+        try {
+          const boot = await fetchPublicBootstrap({ force });
+          setSchoolTotals(boot.schoolTotals);
+          setMissionsEnabled(boot.settings.missions_enabled);
+          if (boot.projects.length) {
+            setProjects(boot.projects);
+            dbProjects = boot.projects;
+          }
+          coreFetchedAtRef.current = Date.now();
+        } catch (bootErr) {
+          // Soft-fail bootstrap: fall back to legacy totals route only.
+          try {
+            setSchoolTotals(await fetchSchoolTotals());
+          } catch {
+            /* ignore */
+          }
+          if (!includeDistricts) {
+            throw bootErr instanceof Error
+              ? bootErr
+              : new Error("โหลดโครงการไม่สำเร็จ");
+          }
+        }
       }
 
       const sess = readSession();
@@ -325,7 +338,9 @@ export function IctStoreProvider({ children }: { children: React.ReactNode }) {
         setCandidates([]);
       }
 
-      const siteId = getSiteProject(dbProjects?.length ? dbProjects : MOCK_PROJECTS)?.id;
+      const siteId = getSiteProject(
+        dbProjects?.length ? dbProjects : projectsRef.current.length ? projectsRef.current : MOCK_PROJECTS
+      )?.id;
 
       const parallel: Promise<void>[] = [];
 

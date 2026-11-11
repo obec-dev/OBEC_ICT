@@ -13,6 +13,7 @@ import {
   sectionAnswerStatus,
 } from "@/lib/lessonExamMap";
 import { touchSessionActivity } from "@/lib/auth/sessionLifecycle";
+import { creditElearningVideo } from "@/lib/supabase/activity";
 import { getSiteProject } from "@/lib/siteSettings";
 import type { ProjectVideo } from "@/types/ict";
 
@@ -50,6 +51,9 @@ function LearnContent() {
     questions,
     ensureLearningContent,
   } = useIctStore();
+  const activeVideoRowIdRef = useRef("");
+  const candidatePhoneRef = useRef("");
+  const candidateIdRef = useRef("");
 
   useEffect(() => {
     void ensureLearningContent();
@@ -113,6 +117,9 @@ function LearnContent() {
   const currentProjectIdRef = useRef(currentProject?.id);
   ytVideoIdRef.current = ytVideoId;
   currentProjectIdRef.current = currentProject?.id;
+  activeVideoRowIdRef.current = activeVideo?.id || "";
+  candidateIdRef.current = currentCandidate?.id || "";
+  candidatePhoneRef.current = currentCandidate?.phone || "";
 
   const hasStartedSavedRef = useRef(false);
   const hasCompletedSavedRef = useRef(false);
@@ -199,12 +206,23 @@ function LearnContent() {
         duration_seconds: dur,
         completed: true,
       });
-      setSaving(false);
-      if (result.ok) {
+      if (result.ok && candidateIdRef.current && candidatePhoneRef.current && activeVideoRowIdRef.current) {
+        const credit = await creditElearningVideo(
+          candidateIdRef.current,
+          candidatePhoneRef.current,
+          activeVideoRowIdRef.current
+        );
+        if (credit.ok && credit.credited && credit.points > 0) {
+          setSaveMessage(`✓ รับชมครบแล้ว (+${credit.points} คะแนน)`);
+        } else {
+          setSaveMessage("✓ รับชมครบแล้ว");
+        }
+      } else if (result.ok) {
         setSaveMessage("✓ รับชมครบแล้ว");
       } else {
         setSaveError(result.error);
       }
+      setSaving(false);
     };
   }, [saveWatchProgress]);
 

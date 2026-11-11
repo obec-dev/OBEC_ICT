@@ -13,14 +13,22 @@ export type AccessRole =
 
 /** Paths each authenticated portal role may enter (prefix match). */
 const ROLE_PATH_PREFIXES: Record<Exclude<AccessRole, "guest">, string[]> = {
-  user: ["/dashboard", "/portal/learn", "/portal/exam", "/portal/profile", "/portal/missions"],
+  user: [
+    "/dashboard",
+    "/portal/learn",
+    "/portal/exam",
+    "/portal/e-learning",
+    "/portal/profile",
+    "/portal/activity",
+  ],
   school_admin: [
     "/dashboard",
     "/portal/learn",
     "/portal/exam",
+    "/portal/e-learning",
     "/portal/profile",
+    "/portal/activity",
     "/portal/school-profile",
-    "/portal/missions",
   ],
   business: ["/dashboard", "/portal/business"],
   audit: ["/dashboard", "/portal/audit"],

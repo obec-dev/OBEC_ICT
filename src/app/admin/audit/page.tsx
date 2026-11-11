@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
 import { useIctStore } from "@/contexts/IctStore";
@@ -48,6 +48,92 @@ function bangkokStampForFilename(d = new Date()): string {
   return `${get("year")}-${get("month")}-${get("day")}-${get("hour")}${get("minute")}${get("second")}`;
 }
 
+function auditSummaryLabel(log: AuditLogRow): string {
+  const s = log.summary?.trim();
+  if (s) return s;
+  const bits = [log.action, log.target_id].filter(Boolean);
+  return bits.length ? bits.join(" · ") : log.action;
+}
+
+type SettingChange = { key: string; before: unknown; after: unknown };
+
+function extractSettingChanges(data: unknown): SettingChange[] | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const changes = (data as { changes?: unknown }).changes;
+  if (!Array.isArray(changes) || changes.length === 0) return null;
+  const rows: SettingChange[] = [];
+  for (const item of changes) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    if (typeof row.key !== "string") continue;
+    rows.push({ key: row.key, before: row.before, after: row.after });
+  }
+  return rows.length ? rows : null;
+}
+
+function formatAuditJson(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function AuditDetailPanel({ log }: { log: AuditLogRow }) {
+  const changes =
+    extractSettingChanges(log.new_data) ?? extractSettingChanges(log.old_data);
+
+  if (changes) {
+    return (
+      <div className="space-y-2 text-xs">
+        <p className="font-semibold text-gray-700">ค่าที่เปลี่ยน</p>
+        <div className="overflow-x-auto rounded-xl border border-gray-100 bg-white">
+          <table className="w-full text-left">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                <th className="px-3 py-2 font-semibold">key</th>
+                <th className="px-3 py-2 font-semibold">ก่อน</th>
+                <th className="px-3 py-2 font-semibold">หลัง</th>
+              </tr>
+            </thead>
+            <tbody>
+              {changes.map((c) => (
+                <tr key={c.key} className="border-t border-gray-100 align-top">
+                  <td className="px-3 py-2 font-mono whitespace-nowrap">{c.key}</td>
+                  <td className="px-3 py-2 font-mono whitespace-pre-wrap break-all text-amber-800">
+                    {formatAuditJson(c.before)}
+                  </td>
+                  <td className="px-3 py-2 font-mono whitespace-pre-wrap break-all text-emerald-800">
+                    {formatAuditJson(c.after)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2 text-xs">
+      <div>
+        <p className="font-semibold text-gray-700 mb-1">ก่อน (old_data)</p>
+        <pre className="rounded-xl border border-gray-100 bg-white p-3 overflow-x-auto whitespace-pre-wrap break-all text-amber-900">
+          {formatAuditJson(log.old_data)}
+        </pre>
+      </div>
+      <div>
+        <p className="font-semibold text-gray-700 mb-1">หลัง (new_data)</p>
+        <pre className="rounded-xl border border-gray-100 bg-white p-3 overflow-x-auto whitespace-pre-wrap break-all text-emerald-900">
+          {formatAuditJson(log.new_data)}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 function AuditContent() {
   const { adminToken } = useIctStore();
   const [logs, setLogs] = useState<AuditLogRow[]>([]);
@@ -65,6 +151,7 @@ function AuditContent() {
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const PAGE_SIZE = 50;
 
   const reload = useCallback(async () => {
@@ -244,26 +331,60 @@ function AuditContent() {
             <table className="w-full text-sm">
               <thead className="bg-[var(--primary-blue)] text-white">
                 <tr>
+                  <th className="text-left px-3 py-3 w-8" aria-label="expand" />
                   <th className="text-left px-3 py-3">เวลา</th>
                   <th className="text-left px-3 py-3">ผู้ดูแล</th>
+                  <th className="text-left px-3 py-3">รายละเอียด</th>
                   <th className="text-left px-3 py-3">action</th>
                   <th className="text-left px-3 py-3">ตาราง</th>
                   <th className="text-left px-3 py-3">target</th>
                 </tr>
               </thead>
               <tbody>
-                {logs.map((log) => (
-                  <tr key={log.log_id} className="border-t border-gray-100 align-top">
-                    <td className="px-3 py-3 text-xs whitespace-nowrap">{formatAuditTime(log.created_at)}</td>
-                    <td className="px-3 py-3">{log.admin_username ?? "-"}</td>
-                    <td className="px-3 py-3 font-semibold">{log.action}</td>
-                    <td className="px-3 py-3">{log.target_table}</td>
-                    <td className="px-3 py-3 font-mono text-xs break-all">{log.target_id ?? "-"}</td>
-                  </tr>
-                ))}
+                {logs.map((log) => {
+                  const open = expandedId === log.log_id;
+                  const hasPayload = log.old_data != null || log.new_data != null;
+                  return (
+                    <Fragment key={log.log_id}>
+                      <tr className="border-t border-gray-100 align-top">
+                        <td className="px-2 py-3">
+                          <button
+                            type="button"
+                            disabled={!hasPayload}
+                            aria-expanded={open}
+                            onClick={() =>
+                              setExpandedId((prev) => (prev === log.log_id ? null : log.log_id))
+                            }
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 text-xs font-bold text-[var(--primary-blue)] disabled:opacity-30 disabled:cursor-default"
+                            title={hasPayload ? (open ? "ซ่อนรายละเอียด" : "ดูก่อน/หลัง") : "ไม่มีข้อมูลก่อน/หลัง"}
+                          >
+                            {open ? "−" : "+"}
+                          </button>
+                        </td>
+                        <td className="px-3 py-3 text-xs whitespace-nowrap">{formatAuditTime(log.created_at)}</td>
+                        <td className="px-3 py-3">{log.admin_username ?? "-"}</td>
+                        <td className="px-3 py-3 text-gray-800 max-w-xs md:max-w-md">
+                          <span className="line-clamp-2" title={auditSummaryLabel(log)}>
+                            {auditSummaryLabel(log)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 font-semibold whitespace-nowrap">{log.action}</td>
+                        <td className="px-3 py-3 whitespace-nowrap">{log.target_table}</td>
+                        <td className="px-3 py-3 font-mono text-xs break-all">{log.target_id ?? "-"}</td>
+                      </tr>
+                      {open && (
+                        <tr className="border-t border-gray-50 bg-slate-50/80">
+                          <td colSpan={7} className="px-4 py-4">
+                            <AuditDetailPanel log={log} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
                 {logs.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                       ยังไม่มี log
                     </td>
                   </tr>

@@ -15,6 +15,8 @@ export type SitePeriodSettings = {
   hero_description: string;
   /** When false, hide missions menu and keep learn/exam after pass. Default off until launch. */
   missions_enabled: boolean;
+  /** When true, auditors may approve activity reports; when false, admin only. */
+  auditor_can_approve_reports: boolean;
 };
 
 export type PeriodStatus = {
@@ -75,6 +77,7 @@ export function parseSiteSettings(raw: Record<string, unknown>): SitePeriodSetti
       "แพลตฟอร์มลงทะเบียน เรียนรู้ และสอบคัดเลือกผู้แทนเทคโนโลยีสารสนเทศของโรงเรียน ครอบคลุมเขตพื้นที่การศึกษาทั่วประเทศ",
     // Default false — feature not launched yet
     missions_enabled: asBool(raw.missions_enabled, false),
+    auditor_can_approve_reports: asBool(raw.auditor_can_approve_reports, true),
   };
 }
 
@@ -374,6 +377,14 @@ export function getAnyProjectRegistrationStatus(
 }
 
 export async function fetchPublicSiteSettings(): Promise<SitePeriodSettings> {
+  try {
+    const { fetchPublicBootstrap } = await import("@/lib/supabase/bootstrap");
+    const boot = await fetchPublicBootstrap();
+    return boot.settings;
+  } catch {
+    /* fall through to direct table read */
+  }
+
   const supabase = createClient();
   const { data, error } = await supabase.from("site_settings").select("key, value");
   if (error) throw new Error(error.message);

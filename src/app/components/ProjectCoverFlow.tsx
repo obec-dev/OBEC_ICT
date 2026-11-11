@@ -57,20 +57,13 @@ export function ProjectCoverFlow({
   projects: LearningProject[];
   hasSession?: boolean;
 }) {
-  const { session, getExamFor, examProgress, projects: allProjects, missionsEnabled } =
-    useIctStore();
+  const { session, getExamFor, examProgress, projects: allProjects } = useIctStore();
   const { theme } = useTheme();
   const isDark = theme === "dark";
   const project = useMemo(() => getSiteProject(projects), [projects]);
   const portalHome = useMemo(
-    () =>
-      candidatePortalHome(
-        session,
-        examProgress,
-        allProjects.length ? allProjects : projects,
-        missionsEnabled
-      ),
-    [session, examProgress, allProjects, projects, missionsEnabled]
+    () => candidatePortalHome(session, examProgress, allProjects.length ? allProjects : projects),
+    [session, examProgress, allProjects, projects]
   );
   if (!project || project.is_active === false) return null;
 

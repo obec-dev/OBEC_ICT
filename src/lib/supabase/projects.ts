@@ -39,6 +39,14 @@ export function extractYouTubeId(urlOrId: string): string {
 
 export async function fetchProjects(): Promise<LearningProject[]> {
   try {
+    const { fetchPublicBootstrap } = await import("@/lib/supabase/bootstrap");
+    const boot = await fetchPublicBootstrap();
+    if (boot.projects.length) return boot.projects;
+  } catch {
+    /* fall through to direct table read */
+  }
+
+  try {
     const supabase = createClient();
     const { data, error } = await supabase
       .from("projects")
@@ -81,7 +89,7 @@ export async function fetchProjectVideos(projectId?: string): Promise<ProjectVid
     let query = supabase
       .from("project_videos")
       .select(
-        "id, project_id, title, video_url, video_id, is_mandatory, order_index, exam_section_id, created_at"
+        "id, project_id, title, video_url, video_id, is_mandatory, order_index, exam_section_id, score_points, created_at"
       )
       .order("order_index", { ascending: true });
     if (projectId) {

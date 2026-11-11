@@ -18,26 +18,24 @@ export function candidateHasPassedExam(
 }
 
 /**
- * Missions unlock after a graded pass — only when the site setting is enabled.
- * Pass `missionsEnabled` from site_settings (default false until launch).
+ * @deprecated Missions replaced by activity tasks on /portal/profile.
+ * Always false so learn/exam remain available after pass.
  */
 export function candidateCanAccessMissions(
-  session: SessionUser | null | undefined,
-  examProgress: ExamProgress[],
-  projects: LearningProject[],
-  missionsEnabled = false
+  _session?: SessionUser | null,
+  _examProgress?: ExamProgress[],
+  _projects?: LearningProject[],
+  _missionsEnabled = false
 ): boolean {
-  if (!missionsEnabled) return false;
-  return candidateHasPassedExam(session, examProgress, projects);
+  return false;
 }
 
+/** Portal home for candidates — learn (missions hub moved to profile). */
 export function candidatePortalHome(
-  session: SessionUser | null | undefined,
-  examProgress: ExamProgress[],
-  projects: LearningProject[],
-  missionsEnabled = false
+  _session?: SessionUser | null,
+  _examProgress?: ExamProgress[],
+  _projects?: LearningProject[],
+  _missionsEnabled = false
 ): string {
-  return candidateCanAccessMissions(session, examProgress, projects, missionsEnabled)
-    ? "/portal/missions"
-    : "/portal/learn";
+  return "/portal/learn";
 }

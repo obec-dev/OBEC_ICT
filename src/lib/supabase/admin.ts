@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
 import { parseDistrictIdList } from "@/lib/supabase/data";
+import { normalizeExternalUrl } from "@/lib/url";
 import type { AdminRole, AdminUser, Candidate, ExamProgress, PortalRole } from "@/types/ict";
 
 function asObj(data: unknown): Record<string, unknown> {
@@ -178,6 +179,12 @@ export async function adminSaveSettings(token: string, settings: Record<string, 
   if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
   const row = asObj(data);
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกตั้งค่าไม่สำเร็จ") };
+  try {
+    const { invalidatePublicBootstrapCache } = await import("@/lib/supabase/bootstrap");
+    invalidatePublicBootstrapCache();
+  } catch {
+    /* ignore */
+  }
   return { ok: true as const };
 }
 
@@ -449,6 +456,7 @@ export type AuditLogRow = {
   target_id: string | null;
   old_data: unknown;
   new_data: unknown;
+  summary?: string | null;
   ip_address: string | null;
   created_at: string;
 };
@@ -549,6 +557,7 @@ export async function adminListAuditLogs(token: string, limit = 100, offset = 0)
       target_id: r.target_id ? String(r.target_id) : null,
       old_data: r.old_data ?? null,
       new_data: r.new_data ?? null,
+      summary: r.summary != null && String(r.summary).trim() !== "" ? String(r.summary) : null,
       ip_address: r.ip_address ? String(r.ip_address) : null,
       created_at: String(r.created_at),
     };
@@ -584,6 +593,7 @@ export async function adminExportAuditLogs(token: string): Promise<AuditLogRow[]
       target_id: r.target_id ? String(r.target_id) : null,
       old_data: r.old_data ?? null,
       new_data: r.new_data ?? null,
+      summary: r.summary != null && String(r.summary).trim() !== "" ? String(r.summary) : null,
       ip_address: r.ip_address ? String(r.ip_address) : null,
       created_at: String(r.created_at),
     };
@@ -928,6 +938,49 @@ export async function adminMissionProgressStats(token: string) {
   };
 }
 
+export type AdminActivityOverviewStats = {
+  points_total: number;
+  users_with_score: number;
+  points_by_source: Record<string, number>;
+  live_active: number;
+  live_in_window: number;
+  live_checkins_total: number;
+  live_checkins_today: number;
+  tasks_open: number;
+  submissions_pending: number;
+  submissions_approved: number;
+  submissions_draft: number;
+  submissions_rejected: number;
+};
+
+export async function adminActivityOverviewStats(
+  token: string
+): Promise<AdminActivityOverviewStats> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_activity_overview_stats", { p_token: token });
+  if (error) throw adminRpcFail(error);
+  const row = asObj(data);
+  const bySourceRaw = asObj(row.points_by_source);
+  const points_by_source: Record<string, number> = {};
+  for (const [k, v] of Object.entries(bySourceRaw)) {
+    points_by_source[k] = Number(v) || 0;
+  }
+  return {
+    points_total: Number(row.points_total) || 0,
+    users_with_score: Number(row.users_with_score) || 0,
+    points_by_source,
+    live_active: Number(row.live_active) || 0,
+    live_in_window: Number(row.live_in_window) || 0,
+    live_checkins_total: Number(row.live_checkins_total) || 0,
+    live_checkins_today: Number(row.live_checkins_today) || 0,
+    tasks_open: Number(row.tasks_open) || 0,
+    submissions_pending: Number(row.submissions_pending) || 0,
+    submissions_approved: Number(row.submissions_approved) || 0,
+    submissions_draft: Number(row.submissions_draft) || 0,
+    submissions_rejected: Number(row.submissions_rejected) || 0,
+  };
+}
+
 export type ExecutiveUserRow = {
   id: string;
   kind: "business" | "audit";
@@ -1135,3 +1188,315 @@ export async function adminResetExecutiveTempPasswordRpc(
   if (!row.ok) return { ok: false as const, error: String(row.error ?? "รีเซ็ตรหัสผ่านไม่สำเร็จ") };
   return { ok: true as const, temp_password: String(row.temp_password ?? "") };
 }
+
+function asArr(data: unknown): unknown[] {
+  return Array.isArray(data) ? data : [];
+}
+
+export async function adminListActivityProjects(token: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_activity_projects", { p_token: token });
+  if (error) throw adminRpcFail(error);
+  return asArr(data).map((item) => {
+    const m = asObj(item);
+    return {
+      id: String(m.id),
+      name: String(m.name ?? ""),
+      created_at: m.created_at ? String(m.created_at) : "",
+    };
+  });
+}
+
+export async function adminListActivityTasks(token: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_activity_tasks", { p_token: token });
+  if (error) throw adminRpcFail(error);
+  return asArr(data).map((item) => {
+    const m = asObj(item);
+    return {
+      id: String(m.id),
+      activity_project_id: m.activity_project_id ? String(m.activity_project_id) : "",
+      activity_project_name: m.activity_project_name ? String(m.activity_project_name) : null,
+      project_id: m.project_id ? String(m.project_id) : "",
+      project_name: m.project_name ? String(m.project_name) : null,
+      report_name: String(m.report_name ?? ""),
+      report_detail: m.report_detail != null ? String(m.report_detail) : "",
+      report_deadline: m.report_deadline ? String(m.report_deadline) : "",
+      include_report_name: m.include_report_name !== false,
+      include_detail: Boolean(m.include_detail),
+      include_deadline: Boolean(m.include_deadline),
+      include_video_url: m.include_video_url !== false,
+      include_doc_url: m.include_doc_url !== false,
+      score_points: Number(m.score_points) || 0,
+      is_open: Boolean(m.is_open),
+      activity_year: Number(m.activity_year) || new Date().getFullYear(),
+      submission_count: Number(m.submission_count) || 0,
+      approved_count: Number(m.approved_count) || 0,
+      pending_count: Number(m.pending_count) || 0,
+    };
+  });
+}
+
+export async function adminListPendingSubmissions(token: string, page = 1, pageSize = 10) {
+  const offset = Math.max(0, (page - 1) * pageSize);
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_pending_submissions", {
+    p_token: token,
+    p_limit: pageSize,
+    p_offset: offset,
+  });
+  if (error) throw adminRpcFail(error);
+  const row = asObj(data);
+  return {
+    total: Number(row.total) || 0,
+    rows: asArr(row.rows).map((item) => {
+      const m = asObj(item);
+      return {
+        id: String(m.id),
+        task_id: String(m.task_id ?? ""),
+        report_name: String(m.report_name ?? ""),
+        activity_project_name: m.activity_project_name ? String(m.activity_project_name) : "",
+        score_points: Number(m.score_points) || 0,
+        profile_id: String(m.profile_id ?? ""),
+        first_name: String(m.first_name ?? ""),
+        last_name: String(m.last_name ?? ""),
+        school_name: String(m.school_name ?? ""),
+        video_url: m.video_url ? String(m.video_url) : null,
+        doc_url: m.doc_url ? String(m.doc_url) : null,
+        report_url: m.report_url ? String(m.report_url) : null,
+        submitted_at: m.submitted_at ? String(m.submitted_at) : null,
+        status: String(m.status ?? "pending"),
+      };
+    }),
+  };
+}
+
+export async function adminReviewSubmission(
+  token: string,
+  submissionId: string,
+  approve: boolean,
+  note?: string
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_review_submission", {
+    p_token: token,
+    p_submission_id: submissionId,
+    p_approve: approve,
+    p_note: note ?? null,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminUpsertActivityTask(token: string, task: Record<string, unknown>) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_upsert_activity_task", {
+    p_token: token,
+    p_task: task,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกภารกิจไม่สำเร็จ") };
+  return { ok: true as const, id: String(row.id ?? "") };
+}
+
+export async function adminDeleteActivityTask(token: string, taskId: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_delete_activity_task", {
+    p_token: token,
+    p_task_id: taskId,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "ลบไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminListLiveMeetings(token: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_live_meetings", { p_token: token });
+  if (error) throw adminRpcFail(error);
+  return asArr(data).map((item) => {
+    const m = asObj(item);
+    return {
+      id: String(m.id),
+      title: String(m.title ?? ""),
+      youtube_url: String(m.youtube_url ?? ""),
+      window_start: m.window_start ? String(m.window_start) : "",
+      window_end: m.window_end ? String(m.window_end) : "",
+      score_points: Number(m.score_points) || 0,
+      is_active: m.is_active !== false,
+    };
+  });
+}
+
+export async function adminUpsertLiveMeeting(token: string, meeting: Record<string, unknown>) {
+  const youtube = meeting.youtube_url != null ? String(meeting.youtube_url) : "";
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_upsert_live_meeting", {
+    p_token: token,
+    p_meeting: {
+      ...meeting,
+      youtube_url: normalizeExternalUrl(youtube) || youtube,
+    },
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึก Live ไม่สำเร็จ") };
+  return { ok: true as const, id: String(row.id ?? "") };
+}
+
+export async function adminDeleteLiveMeeting(token: string, meetingId: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_delete_live_meeting", {
+    p_token: token,
+    p_meeting_id: meetingId,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "ลบไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminListAuditorDocuments(token: string, districtId?: string | null) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_auditor_documents", {
+    p_token: token,
+    p_district_id: districtId ?? null,
+  });
+  if (error) throw adminRpcFail(error);
+  return asArr(data).map((item) => {
+    const m = asObj(item);
+    return {
+      id: String(m.id),
+      district_id: String(m.district_id ?? ""),
+      title: String(m.title ?? ""),
+      file_url: m.file_url ? String(m.file_url) : m.file_path ? String(m.file_path) : "",
+      created_at: m.created_at ? String(m.created_at) : "",
+    };
+  });
+}
+
+export async function adminUpsertAuditorDocument(token: string, doc: Record<string, unknown>) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_upsert_auditor_document", {
+    p_token: token,
+    p_doc: doc,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกเอกสารไม่สำเร็จ") };
+  return { ok: true as const, id: String(row.id ?? "") };
+}
+
+export async function adminDeleteAuditorDocument(token: string, docId: string) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_delete_auditor_document", {
+    p_token: token,
+    p_doc_id: docId,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "ลบไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export async function adminSetVideoScorePoints(token: string, videoId: string, scorePoints: number) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_set_video_score_points", {
+    p_token: token,
+    p_video_id: videoId,
+    p_score_points: scorePoints,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "บันทึกคะแนนวิดีโอไม่สำเร็จ") };
+  return { ok: true as const };
+}
+
+export type ScoreAdjustmentRow = {
+  id: string;
+  profile_id: string;
+  points: number;
+  remark: string;
+  notify_user: boolean;
+  admin_id: string | null;
+  created_at: string;
+};
+
+export async function adminProfileScores(
+  token: string,
+  profileIds: string[]
+): Promise<Record<string, number>> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_profile_scores", {
+    p_token: token,
+    p_profile_ids: profileIds,
+  });
+  if (error) throw adminRpcFail(error);
+  const row = asObj(data);
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(row)) {
+    out[k] = Number(v) || 0;
+  }
+  return out;
+}
+
+export async function adminAdjustScore(
+  token: string,
+  profileId: string,
+  points: number,
+  remark: string,
+  notify: boolean,
+  userComment?: string
+) {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_adjust_score", {
+    p_token: token,
+    p_profile_id: profileId,
+    p_points: points,
+    p_remark: remark,
+    p_notify: notify,
+    p_user_comment: userComment?.trim() || null,
+  });
+  if (error) return { ok: false as const, error: normalizeAdminError(error.message) };
+  const row = asObj(data);
+  if (!row.ok) return { ok: false as const, error: String(row.error ?? "ปรับคะแนนไม่สำเร็จ") };
+  return {
+    ok: true as const,
+    id: String(row.id ?? ""),
+    points: Number(row.points) || 0,
+    total_score: Number(row.total_score) || 0,
+  };
+}
+
+export async function adminListScoreAdjustments(
+  token: string,
+  profileId: string,
+  limit = 10
+): Promise<ScoreAdjustmentRow[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc("admin_list_score_adjustments", {
+    p_token: token,
+    p_profile_id: profileId,
+    p_limit: Math.min(limit, 10),
+  });
+  if (error) throw adminRpcFail(error);
+  return asArr(data)
+    .map((item) => {
+      const m = asObj(item);
+      return {
+        id: String(m.id),
+        profile_id: String(m.profile_id ?? ""),
+        points: Number(m.points) || 0,
+        remark: String(m.remark ?? ""),
+        notify_user: m.notify_user === true,
+        admin_id: m.admin_id ? String(m.admin_id) : null,
+        created_at: String(m.created_at ?? ""),
+      };
+    })
+    .slice(0, 10);
+}
+
