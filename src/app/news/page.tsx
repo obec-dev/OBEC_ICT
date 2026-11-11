@@ -10,6 +10,7 @@ import { inputClass } from "@/lib/styles";
 import type { NewsListItem } from "@/types/ict";
 
 const PAGE_SIZE = 10;
+const TOP_TAG_COUNT = 20;
 
 function dayStartIso(dateStr: string): string | null {
   if (!dateStr) return null;
@@ -49,6 +50,8 @@ function NewsIndexContent() {
   const [from, setFrom] = useState(fromParam);
   const [to, setTo] = useState(toParam);
   const [page, setPage] = useState(pageParam);
+  const [tagQuery, setTagQuery] = useState("");
+  const [tagSuggestOpen, setTagSuggestOpen] = useState(false);
 
   useEffect(() => {
     setQ(qParam);
@@ -87,16 +90,37 @@ function NewsIndexContent() {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
 
-  const tagOptions = useMemo(() => {
-    const set = new Set<string>();
+  /** All unique tags with frequency (for top-20 + search). */
+  const tagStats = useMemo(() => {
+    const counts = new Map<string, number>();
     for (const n of items) {
       for (const t of n.hashtags ?? []) {
         const trimmed = t.trim();
-        if (trimmed) set.add(trimmed);
+        if (!trimmed) continue;
+        counts.set(trimmed, (counts.get(trimmed) || 0) + 1);
       }
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "th"));
+    return Array.from(counts.entries())
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.tag.localeCompare(b.tag, "th");
+      });
   }, [items]);
+
+  const topTags = useMemo(
+    () => tagStats.slice(0, TOP_TAG_COUNT).map((t) => t.tag),
+    [tagStats]
+  );
+
+  const tagSuggestions = useMemo(() => {
+    const qLower = tagQuery.trim().toLowerCase().replace(/^#/, "");
+    if (!qLower) return [];
+    return tagStats
+      .filter((t) => t.tag.toLowerCase().includes(qLower) && !tags.includes(t.tag))
+      .slice(0, 12)
+      .map((t) => t.tag);
+  }, [tagQuery, tagStats, tags]);
 
   const filtered = useMemo(() => {
     const qLower = q.trim().toLowerCase();
@@ -159,6 +183,30 @@ function NewsIndexContent() {
     setTags(next);
     setPage(1);
     syncUrl({ tags: next, page: 1 });
+  };
+
+  const addTags = (rawList: string[]) => {
+    const cleaned = rawList
+      .map((t) => t.trim().replace(/^#/, ""))
+      .filter(Boolean);
+    if (!cleaned.length) return;
+    const next = [...tags];
+    for (const t of cleaned) {
+      const existing = next.find((x) => x.toLowerCase() === t.toLowerCase());
+      if (!existing) next.push(t);
+    }
+    if (next.length === tags.length) return;
+    setTags(next);
+    setPage(1);
+    syncUrl({ tags: next, page: 1 });
+  };
+
+  const commitTagQuery = () => {
+    const parts = tagQuery.split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean);
+    if (!parts.length) return;
+    addTags(parts);
+    setTagQuery("");
+    setTagSuggestOpen(false);
   };
 
   const hasFilters = Boolean(q.trim() || tags.length || from || to);
@@ -224,27 +272,99 @@ function NewsIndexContent() {
         </div>
       </div>
 
-      {tagOptions.length > 0 && (
-        <div className="mb-8">
-          <label className="block text-sm font-semibold text-[var(--primary-blue)] mb-2">แฮชแท็ก</label>
-          <div className="flex flex-wrap gap-2">
-            {tagOptions.map((t) => {
-              const selected = tags.includes(t);
-              return (
+      {(tagStats.length > 0 || tags.length > 0) && (
+        <div className="mb-8 space-y-3">
+          <label className="block text-sm font-semibold text-[var(--primary-blue)]">แฮชแท็ก</label>
+
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {tags.map((t) => (
                 <button
-                  key={t}
+                  key={`selected-${t}`}
                   type="button"
                   onClick={() => toggleTag(t)}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${
-                    selected
-                      ? "bg-[var(--primary-blue)] text-white border-[var(--primary-blue)]"
-                      : "bg-white text-[var(--primary-blue)] border-gray-200 hover:border-[var(--primary-blue)]"
-                  }`}
+                  className="text-xs font-bold px-3 py-1.5 rounded-full border bg-[var(--primary-blue)] text-white border-[var(--primary-blue)]"
+                  title="คลิกเพื่อลบ"
                 >
-                  #{t}
+                  #{t} ×
                 </button>
-              );
-            })}
+              ))}
+            </div>
+          )}
+
+          {topTags.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-500 mb-2">แท็กยอดนิยม</p>
+              <div className="flex flex-wrap gap-2">
+                {topTags.map((t) => {
+                  const selected = tags.includes(t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => toggleTag(t)}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${
+                        selected
+                          ? "bg-[var(--primary-blue)] text-white border-[var(--primary-blue)]"
+                          : "bg-white text-[var(--primary-blue)] border-gray-200 hover:border-[var(--primary-blue)]"
+                      }`}
+                    >
+                      #{t}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="relative max-w-md">
+            <p className="text-xs text-gray-500 mb-2">
+              ค้นหา / พิมพ์แท็กอื่น
+            </p>
+            <input
+              className={inputClass}
+              value={tagQuery}
+              placeholder="ไม่ต้องใส่ #"
+              onChange={(e) => {
+                setTagQuery(e.target.value);
+                setTagSuggestOpen(true);
+              }}
+              onFocus={() => setTagSuggestOpen(true)}
+              onBlur={() => {
+                window.setTimeout(() => setTagSuggestOpen(false), 150);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (tagSuggestions.length === 1) {
+                    addTags([tagSuggestions[0]]);
+                    setTagQuery("");
+                    setTagSuggestOpen(false);
+                  } else {
+                    commitTagQuery();
+                  }
+                }
+              }}
+            />
+            {tagSuggestOpen && tagSuggestions.length > 0 && (
+              <div className="absolute z-20 left-0 right-0 mt-1 rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden">
+                {tagSuggestions.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    className="block w-full text-left px-3 py-2 text-sm font-semibold text-[var(--primary-blue)] hover:bg-blue-50"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      addTags([t]);
+                      setTagQuery("");
+                      setTagSuggestOpen(false);
+                    }}
+                  >
+                    #{t}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
