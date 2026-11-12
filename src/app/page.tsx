@@ -10,7 +10,7 @@ import { useIctStore, useSchoolStats } from "@/contexts/IctStore";
 import { ctaForSession } from "@/lib/auth/access";
 import {
   fetchPublicSiteSettings,
-  getAnyProjectRegistrationStatus,
+  isRegistrationOpen,
   type SitePeriodSettings,
 } from "@/lib/siteSettings";
 
@@ -32,8 +32,8 @@ export default function Home() {
   const stats = useSchoolStats();
   const [hero, setHero] = useState<HeroCopy>(HERO_DEFAULTS);
 
-  const regStatus = useMemo(
-    () => (hydrated ? getAnyProjectRegistrationStatus(projects) : null),
+  const registrationOpen = useMemo(
+    () => (hydrated ? isRegistrationOpen(projects) : false),
     [hydrated, projects]
   );
 
@@ -87,30 +87,22 @@ export default function Home() {
             <p className="text-lg md:text-xl text-blue-100 max-w-2xl mx-auto md:mx-0 font-light leading-relaxed">
               {hero.hero_description}
             </p>
-            {regStatus && !regStatus.open && (
-              <p className="text-sm text-blue-100/90">{regStatus.message}</p>
-            )}
-
             <div className="flex flex-col sm:flex-row gap-4 pt-4 justify-center md:flex-wrap md:justify-start">
               {hydrated && session ? (
                 <Link
-                  href={ctaForSession(session).href}
+                  href={ctaForSession(session, { registrationOpen }).href}
                   className="bg-[var(--accent-green)] text-white px-8 py-4 rounded-full text-lg font-bold hover:bg-green-600 transition-all duration-300 shadow-xl hover:shadow-green-900/50 hover:-translate-y-1 active:translate-y-0 flex items-center justify-center gap-2"
                 >
-                  {ctaForSession(session).label}
+                  {ctaForSession(session, { registrationOpen }).label}
                 </Link>
-              ) : regStatus && !regStatus.open ? (
-                <span className="bg-white/15 text-white/80 px-8 py-4 rounded-full text-lg font-bold flex items-center justify-center gap-2 cursor-not-allowed">
-                  ปิดรับลงทะเบียน
-                </span>
-              ) : (
+              ) : registrationOpen ? (
                 <Link
                   href="/register/consent"
                   className="bg-[var(--accent-red)] text-white px-8 py-4 rounded-full text-lg font-bold hover:bg-red-700 transition-all duration-300 shadow-xl hover:shadow-red-900/50 hover:-translate-y-1 active:translate-y-0 flex items-center justify-center gap-2"
                 >
                   ลงทะเบียนตัวแทน
                 </Link>
-              )}
+              ) : null}
 
               <Link
                 href="/dashboard"

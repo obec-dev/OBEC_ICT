@@ -113,7 +113,10 @@ export function parseAccessRoleCookie(value: string | undefined | null): AccessR
   return "guest";
 }
 
-export function ctaForSession(session: SessionUser | null | undefined): {
+export function ctaForSession(
+  session: SessionUser | null | undefined,
+  opts?: { registrationOpen?: boolean }
+): {
   href: string;
   label: string;
 } {
@@ -130,6 +133,9 @@ export function ctaForSession(session: SessionUser | null | undefined): {
     case "user":
       return { href: "/portal/profile", label: "จัดการโปรไฟล์" };
     default:
-      return { href: "/register/consent", label: "ลงทะเบียนตัวแทน" };
+      if (opts?.registrationOpen) {
+        return { href: "/register/consent", label: "ลงทะเบียนตัวแทน" };
+      }
+      return { href: "/login", label: "เข้าสู่ระบบ" };
   }
 }

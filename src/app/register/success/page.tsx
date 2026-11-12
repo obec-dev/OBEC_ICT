@@ -1,8 +1,32 @@
 "use client";
 
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useIctStore } from "@/contexts/IctStore";
+import { isRegistrationOpen } from "@/lib/siteSettings";
 
 export default function RegisterSuccessPage() {
+  const router = useRouter();
+  const { projects, hydrated } = useIctStore();
+  const registrationOpen = useMemo(
+    () => (hydrated ? isRegistrationOpen(projects) : true),
+    [hydrated, projects]
+  );
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!registrationOpen) router.replace("/login");
+  }, [hydrated, registrationOpen, router]);
+
+  if (!hydrated || !registrationOpen) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-16">
+        <p className="text-center text-gray-500">กำลังเปลี่ยนเส้นทาง...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-16 animate-fade-in-up">
       <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-10 text-center">

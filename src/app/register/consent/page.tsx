@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { useIctStore } from "@/contexts/IctStore";
 import { STORAGE_KEYS } from "@/lib/storage";
 import { getAnyProjectRegistrationStatus } from "@/lib/siteSettings";
@@ -19,6 +18,11 @@ export default function ConsentPage() {
     [hydrated, projects]
   );
 
+  useEffect(() => {
+    if (!hydrated || !regStatus) return;
+    if (!regStatus.open) router.replace("/login");
+  }, [hydrated, regStatus, router]);
+
   const handleContinue = () => {
     if (!canContinue || !regStatus?.open) return;
     sessionStorage.setItem(STORAGE_KEYS.consent, "accepted");
@@ -34,7 +38,11 @@ export default function ConsentPage() {
   }
 
   if (!regStatus.open) {
-    return <PeriodClosedNotice title="ยังไม่เปิดรับลงทะเบียน" status={regStatus} />;
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-12">
+        <p className="text-gray-500">กำลังเปลี่ยนเส้นทาง...</p>
+      </div>
+    );
   }
 
   return (

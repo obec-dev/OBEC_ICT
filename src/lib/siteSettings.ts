@@ -376,6 +376,11 @@ export function getAnyProjectRegistrationStatus(
   };
 }
 
+/** Public CTA / route gate: true when any active project registration window is open. */
+export function isRegistrationOpen(projects: LearningProject[], now = new Date()): boolean {
+  return getAnyProjectRegistrationStatus(projects, now).open;
+}
+
 export async function fetchPublicSiteSettings(): Promise<SitePeriodSettings> {
   try {
     const { fetchPublicBootstrap } = await import("@/lib/supabase/bootstrap");

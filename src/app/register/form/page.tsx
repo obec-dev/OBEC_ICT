@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PeriodClosedNotice } from "@/app/components/PeriodClosedNotice";
 import { useIctStore } from "@/contexts/IctStore";
 import {
   EMPTY_ICT_SURVEY,
@@ -144,7 +143,7 @@ function buildBirthDate(day: string, month: string, year: string): string | null
 
 export default function RegisterFormPage() {
   const router = useRouter();
-  const { lookupSchool, registerCandidate, projects } = useIctStore();
+  const { lookupSchool, registerCandidate, projects, hydrated } = useIctStore();
   const [ready, setReady] = useState(false);
   const [code, setCode] = useState("");
   const [matched, setMatched] = useState<School | null>(null);
@@ -174,6 +173,13 @@ export default function RegisterFormPage() {
     setReady(true);
     setPeriodLoading(false);
   }, [router]);
+
+  useEffect(() => {
+    if (!hydrated || periodLoading || !ready) return;
+    if (!siteProject || !registrationOpen) {
+      router.replace("/login");
+    }
+  }, [hydrated, periodLoading, ready, siteProject, registrationOpen, router]);
 
   const resetSchoolVerification = () => {
     setMatched(null);
@@ -448,7 +454,7 @@ export default function RegisterFormPage() {
     router.push("/register/success");
   };
 
-  if (periodLoading || !ready) {
+  if (periodLoading || !ready || !hydrated) {
     return (
       <div className="min-h-[50vh] flex items-center justify-center">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[var(--primary-blue)]" />
@@ -458,20 +464,9 @@ export default function RegisterFormPage() {
 
   if (!siteProject || !registrationOpen) {
     return (
-      <PeriodClosedNotice
-        title="ขณะนี้ปิดรับลงทะเบียน"
-        status={
-          siteProject
-            ? getProjectRegistrationStatus(siteProject)
-            : {
-                open: false,
-                reason: "disabled",
-                start: null,
-                end: null,
-                message: "ขณะนี้ไม่มีโครงการที่เปิดรับลงทะเบียนในช่วงเวลานี้",
-              }
-        }
-      />
+      <div className="min-h-[50vh] flex items-center justify-center">
+        <p className="text-gray-500">กำลังเปลี่ยนเส้นทาง...</p>
+      </div>
     );
   }
 

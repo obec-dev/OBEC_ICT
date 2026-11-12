@@ -12,7 +12,7 @@ import {
   type AdminNavGroup,
 } from "@/lib/adminNav";
 import { useIctStore } from "@/contexts/IctStore";
-import { getProjectExamStatus, getSiteProject } from "@/lib/siteSettings";
+import { getProjectExamStatus, getSiteProject, isRegistrationOpen } from "@/lib/siteSettings";
 import type { AdminRole } from "@/types/ict";
 import { NotificationBell } from "./NotificationBell";
 import { SessionMenu } from "./SessionMenu";
@@ -193,6 +193,8 @@ export function Nav() {
     return getProjectExamStatus(site).open;
   }, [projects]);
 
+  const registrationOpen = useMemo(() => isRegistrationOpen(projects), [projects]);
+
   const adminRole: AdminRole = adminUser?.role ?? "admin";
   const adminGroups = useMemo(
     () => (isAdmin ? visibleAdminNavGroups(adminRole) : []),
@@ -207,7 +209,9 @@ export function Nav() {
       { href: "/dashboard", label: "ภาพรวมการลงทะเบียน" },
       { href: "/news", label: "ข่าว" },
     ];
-    if (!isLoggedIn) items.push({ href: "/register/consent", label: "ลงทะเบียน" });
+    if (!isLoggedIn && registrationOpen) {
+      items.push({ href: "/register/consent", label: "ลงทะเบียน" });
+    }
     if (isCandidate) {
       if (examOpen) items.push({ href: "/portal/learn", label: "บทเรียนและแบบทดสอบ" });
       items.push({ href: "/portal/e-learning", label: "E-learning" });
@@ -216,7 +220,7 @@ export function Nav() {
     if (session?.kind === "business") items.push({ href: "/portal/business", label: "ภาพรวมโครงการ" });
     if (session?.kind === "audit") items.push({ href: "/portal/audit", label: "เขตที่ดูแล" });
     return items;
-  }, [isAdmin, isLoggedIn, isCandidate, session?.kind, examOpen]);
+  }, [isAdmin, isLoggedIn, isCandidate, session?.kind, examOpen, registrationOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;

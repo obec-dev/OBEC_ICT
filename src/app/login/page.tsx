@@ -1,19 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useIctStore } from "@/contexts/IctStore";
 import { sessionExpireMessage } from "@/lib/auth/sessionLifecycle";
 import { clearPasswordSetup } from "@/lib/passwordSetup";
+import { isRegistrationOpen } from "@/lib/siteSettings";
 import { setExecutivePassword } from "@/lib/supabase/data";
 import { writeSession } from "@/lib/storage";
 import { inputClass } from "@/lib/styles";
 import type { AuditUser, BusinessUser } from "@/types/ict";
 
 export default function LoginPage() {
-  const { login } = useIctStore();
+  const { login, projects, hydrated } = useIctStore();
   const router = useRouter();
+  const registrationOpen = useMemo(
+    () => (hydrated ? isRegistrationOpen(projects) : false),
+    [hydrated, projects]
+  );
   const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
   const [execSetup, setExecSetup] = useState<{
@@ -220,12 +225,14 @@ export default function LoginPage() {
               คลิกที่นี่ หากท่านลืมรหัสผ่าน
             </Link>
           </span>
-          <span className="block">
-            หากท่านยังไม่มีบัญชี?{" "}
-            <Link href="/register/consent" className="text-[var(--accent-red)] font-semibold">
-              ลงทะเบียน
-            </Link>
-          </span>
+          {registrationOpen ? (
+            <span className="block">
+              หากท่านยังไม่มีบัญชี?{" "}
+              <Link href="/register/consent" className="text-[var(--accent-red)] font-semibold">
+                ลงทะเบียน
+              </Link>
+            </span>
+          ) : null}
         </p>
       </form>
     </div>
