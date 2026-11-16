@@ -370,6 +370,8 @@ export type ActivityHub = {
 export type AuditorDocument = {
   id: string;
   district_id?: string;
+  /** Tagged districts (many-to-many). Prefer over single district_id. */
+  district_ids?: string[];
   title: string;
   file_url?: string | null;
   file_path?: string | null;

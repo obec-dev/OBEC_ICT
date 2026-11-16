@@ -29,10 +29,11 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   },
   {
     id: "activities",
-    label: "กิจกรรม",
+    label: "กิจกรรมต่างๆ",
     roles: ["admin", "super_admin"],
     items: [
       { href: "/admin/activities", label: "กิจกรรมและคะแนน", roles: ["admin", "super_admin"] },
+      { href: "/admin/documents", label: "เอกสาร", roles: ["admin", "super_admin"] },
       { href: "/admin/e-learning", label: "E-learning", roles: ["admin", "super_admin"] },
       { href: "/admin/news", label: "ข่าว", roles: ["admin", "super_admin"] },
     ],

@@ -96,7 +96,13 @@ function AdminHome() {
           {
             href: "/admin/activities",
             title: "กิจกรรมและคะแนน",
-            desc: "ภารกิจรายงาน, Live check-in, เอกสาร Auditor",
+            desc: "ภารกิจรายงาน, Live check-in และคิวอนุมัติ",
+            show: true,
+          },
+          {
+            href: "/admin/documents",
+            title: "เอกสาร Auditor",
+            desc: "มอบเอกสารให้หลายเขต — เลือกทั้งหมด / ยกเว้นเขต",
             show: true,
           },
           {

@@ -1,32 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AuthGuard } from "@/app/components/AuthGuard";
 import { AdminNav } from "@/app/components/AdminNav";
-import { Combobox } from "@/app/components/Combobox";
 import { useIctStore } from "@/contexts/IctStore";
 import { normalizeExternalUrl } from "@/lib/url";
 import {
   adminDeleteActivityTask,
-  adminDeleteAuditorDocument,
   adminDeleteLiveMeeting,
   adminListActivityTasks,
-  adminListAuditorDocuments,
   adminListLiveMeetings,
   adminListPendingSubmissions,
   adminReviewSubmission,
   adminUpsertActivityTask,
-  adminUpsertAuditorDocument,
   adminUpsertLiveMeeting,
 } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/client";
 import { datetimeLocalToIso, isoToDatetimeLocal } from "@/lib/siteSettings";
 import { inputClass } from "@/lib/styles";
 
-type Tab = "tasks" | "approve" | "live" | "docs";
+type Tab = "tasks" | "approve" | "live";
 type TaskRow = Awaited<ReturnType<typeof adminListActivityTasks>>[number];
 type LiveRow = Awaited<ReturnType<typeof adminListLiveMeetings>>[number];
-type DocRow = Awaited<ReturnType<typeof adminListAuditorDocuments>>[number];
 type PendingRow = Awaited<ReturnType<typeof adminListPendingSubmissions>>["rows"][number];
 
 type TaskDraft = {
@@ -66,8 +60,6 @@ function ActivitiesContent() {
   const [tab, setTab] = useState<Tab>("tasks");
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [lives, setLives] = useState<LiveRow[]>([]);
-  const [docs, setDocs] = useState<DocRow[]>([]);
-  const [districts, setDistricts] = useState<{ district_id: string; district_name: string }[]>([]);
   const [draft, setDraft] = useState<TaskDraft>(emptyDraft());
   const [liveDraft, setLiveDraft] = useState<Partial<LiveRow>>({
     title: "Live meeting",
@@ -77,13 +69,6 @@ function ActivitiesContent() {
     score_points: 10,
     is_active: true,
   });
-  const [docDraft, setDocDraft] = useState({
-    id: "",
-    district_id: "",
-    title: "",
-    file_url: "",
-  });
-  const [docFilterDistrict, setDocFilterDistrict] = useState("");
   const [pending, setPending] = useState<PendingRow[]>([]);
   const [pendingTotal, setPendingTotal] = useState(0);
   const [pendingPage, setPendingPage] = useState(1);
@@ -93,33 +78,17 @@ function ActivitiesContent() {
   const [loading, setLoading] = useState(true);
   const pageSize = 10;
 
-  const districtOptions = useMemo(
-    () => districts.map((d) => ({ value: d.district_id, label: d.district_name })),
-    [districts]
-  );
-  const districtNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const d of districts) map.set(d.district_id, d.district_name);
-    return map;
-  }, [districts]);
-  const filteredDocs = useMemo(
-    () => (docFilterDistrict ? docs.filter((d) => d.district_id === docFilterDistrict) : docs),
-    [docs, docFilterDistrict]
-  );
-
   const reload = useCallback(async () => {
     if (!adminToken) return;
     setLoading(true);
     setError("");
     try {
-      const [t, l, d] = await Promise.all([
+      const [t, l] = await Promise.all([
         adminListActivityTasks(adminToken),
         adminListLiveMeetings(adminToken),
-        adminListAuditorDocuments(adminToken),
       ]);
       setTasks(t);
       setLives(l);
-      setDocs(d);
     } catch (err) {
       setError(err instanceof Error ? err.message : "โหลดไม่สำเร็จ");
     } finally {
@@ -145,22 +114,6 @@ function ActivitiesContent() {
   useEffect(() => {
     if (tab === "approve") void reloadPending();
   }, [tab, reloadPending]);
-
-  useEffect(() => {
-    const supabase = createClient();
-    void supabase
-      .from("districts")
-      .select("district_id, district_name")
-      .order("district_name")
-      .then(({ data }) => {
-        setDistricts(
-          (data ?? []).map((r) => ({
-            district_id: String(r.district_id),
-            district_name: String(r.district_name ?? r.district_id),
-          }))
-        );
-      });
-  }, []);
 
   const saveTask = async () => {
     if (!adminToken) return;
@@ -248,41 +201,19 @@ function ActivitiesContent() {
     await reload();
   };
 
-  const saveDoc = async () => {
-    if (!adminToken) return;
-    setError("");
-    setMessage("");
-    const result = await adminUpsertAuditorDocument(adminToken, {
-      id: docDraft.id || undefined,
-      district_id: docDraft.district_id,
-      title: docDraft.title,
-      file_url: normalizeExternalUrl(docDraft.file_url) || docDraft.file_url,
-    });
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    setMessage(docDraft.id ? "แก้ไขเอกสารแล้ว" : "บันทึกเอกสารแล้ว");
-    setDocDraft({ id: "", district_id: "", title: "", file_url: "" });
-    await reload();
-  };
-
   const pendingPages = Math.max(1, Math.ceil(pendingTotal / pageSize));
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "tasks", label: "ภารกิจ / รายงาน" },
     { id: "approve", label: "คิวอนุมัติ" },
     { id: "live", label: "Live meeting" },
-    { id: "docs", label: "เอกสาร Auditor" },
   ];
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-12 animate-fade-in-up">
       <AdminNav />
       <h1 className="text-3xl font-extrabold text-[var(--primary-blue)] mb-2">กิจกรรมและคะแนน</h1>
-      <p className="text-gray-500 mb-6">
-        การตั้งค่ากิจกรรมต่างๆ
-      </p>
+      <p className="text-gray-500 mb-6">ภารกิจรายงาน Live check-in และคิวอนุมัติคะแนน</p>
 
       <div className="flex flex-wrap gap-2 mb-6">
         {tabs.map((t) => (
@@ -681,116 +612,6 @@ function ActivitiesContent() {
           </div>
         </div>
       )}
-
-      {tab === "docs" && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl border p-6 space-y-3">
-            <h2 className="font-bold text-[var(--primary-blue)]">
-              {docDraft.id ? "แก้ไขเอกสาร" : "เพิ่มเอกสาร Auditor"}
-            </h2>
-            <Combobox
-              label="เขต"
-              value={docDraft.district_id}
-              options={districtOptions}
-              placeholder="ค้นหา / เลือกเขต"
-              allLabel="— เลือกเขต —"
-              onChange={(v) => setDocDraft((d) => ({ ...d, district_id: v }))}
-            />
-            <input
-              className={inputClass}
-              placeholder="ชื่อเอกสาร"
-              value={docDraft.title}
-              onChange={(e) => setDocDraft((d) => ({ ...d, title: e.target.value }))}
-            />
-            <input
-              className={inputClass}
-              placeholder="URL ไฟล์ (เช่น www.example.com หรือ https://…)"
-              value={docDraft.file_url}
-              onChange={(e) => setDocDraft((d) => ({ ...d, file_url: e.target.value }))}
-            />
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void saveDoc()}
-                className="rounded-full bg-[var(--primary-blue)] text-white px-5 py-2.5 font-bold"
-              >
-                {docDraft.id ? "บันทึกการแก้ไข" : "บันทึกเอกสาร"}
-              </button>
-              {docDraft.id && (
-                <button
-                  type="button"
-                  className="rounded-full border px-5 py-2.5 font-bold"
-                  onClick={() => setDocDraft({ id: "", district_id: "", title: "", file_url: "" })}
-                >
-                  ยกเลิก
-                </button>
-              )}
-            </div>
-          </div>
-          <div className="bg-white rounded-2xl border p-4 space-y-3">
-            <Combobox
-              label="กรองรายการตามเขต"
-              value={docFilterDistrict}
-              options={districtOptions}
-              placeholder="ทุกเขต"
-              allLabel="ทุกเขต"
-              onChange={setDocFilterDistrict}
-            />
-            <div className="divide-y border rounded-xl">
-              {filteredDocs.map((d) => (
-                <div key={d.id} className="p-4 flex flex-wrap justify-between gap-3">
-                  <div>
-                    <div className="font-bold">{d.title}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {districtNameById.get(d.district_id) || d.district_id}
-                    </div>
-                    {d.file_url && (
-                      <a
-                        href={normalizeExternalUrl(d.file_url)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs underline text-[var(--primary-blue)] break-all"
-                      >
-                        {d.file_url}
-                      </a>
-                    )}
-                  </div>
-                  <div className="flex gap-3 items-start">
-                    <button
-                      type="button"
-                      className="text-sm font-bold text-[var(--primary-blue)]"
-                      onClick={() =>
-                        setDocDraft({
-                          id: d.id,
-                          district_id: d.district_id,
-                          title: d.title,
-                          file_url: d.file_url || "",
-                        })
-                      }
-                    >
-                      แก้ไข
-                    </button>
-                    <button
-                      type="button"
-                      className="text-sm font-bold text-[var(--accent-red)]"
-                      onClick={() => {
-                        if (!adminToken || !confirm("ลบ?")) return;
-                        void adminDeleteAuditorDocument(adminToken, d.id).then(() => reload());
-                      }}
-                    >
-                      ลบ
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {!filteredDocs.length && (
-                <p className="p-4 text-sm text-gray-500">ยังไม่มีเอกสาร</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

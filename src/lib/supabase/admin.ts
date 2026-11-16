@@ -1369,9 +1369,15 @@ export async function adminListAuditorDocuments(token: string, districtId?: stri
   if (error) throw adminRpcFail(error);
   return asArr(data).map((item) => {
     const m = asObj(item);
+    const districtIds = asArr(m.district_ids)
+      .map((x) => String(x ?? "").trim())
+      .filter(Boolean);
+    const legacyId = String(m.district_id ?? "").trim();
+    if (legacyId && !districtIds.includes(legacyId)) districtIds.unshift(legacyId);
     return {
       id: String(m.id),
-      district_id: String(m.district_id ?? ""),
+      district_id: districtIds[0] || legacyId,
+      district_ids: districtIds,
       title: String(m.title ?? ""),
       file_url: m.file_url ? String(m.file_url) : m.file_path ? String(m.file_path) : "",
       created_at: m.created_at ? String(m.created_at) : "",
