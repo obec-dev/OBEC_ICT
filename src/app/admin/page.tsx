@@ -101,7 +101,7 @@ function AdminHome() {
           },
           {
             href: "/admin/documents",
-            title: "เอกสาร Auditor",
+            title: "เอกสาร",
             desc: "มอบเอกสารให้หลายเขต — เลือกทั้งหมด / ยกเว้นเขต",
             show: true,
           },
