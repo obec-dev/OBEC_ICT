@@ -61,14 +61,22 @@ function ActivitiesContent() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [lives, setLives] = useState<LiveRow[]>([]);
   const [draft, setDraft] = useState<TaskDraft>(emptyDraft());
-  const [liveDraft, setLiveDraft] = useState<Partial<LiveRow>>({
+  const emptyLiveDraft = (): Partial<LiveRow> & {
+    convert_to_elearn: boolean;
+    elearn_title: string;
+    elearn_score_points: number;
+  } => ({
     title: "Live meeting",
     youtube_url: "",
     window_start: "",
     window_end: "",
     score_points: 10,
     is_active: true,
+    convert_to_elearn: false,
+    elearn_title: "",
+    elearn_score_points: 10,
   });
+  const [liveDraft, setLiveDraft] = useState(emptyLiveDraft);
   const [pending, setPending] = useState<PendingRow[]>([]);
   const [pendingTotal, setPendingTotal] = useState(0);
   const [pendingPage, setPendingPage] = useState(1);
@@ -176,6 +184,7 @@ function ActivitiesContent() {
     setMessage("");
     const start = datetimeLocalToIso(liveDraft.window_start || "");
     const end = datetimeLocalToIso(liveDraft.window_end || "");
+    const convert = Boolean(liveDraft.convert_to_elearn);
     const result = await adminUpsertLiveMeeting(adminToken, {
       id: liveDraft.id,
       title: liveDraft.title,
@@ -184,20 +193,18 @@ function ActivitiesContent() {
       window_end: end,
       score_points: Number(liveDraft.score_points) || 0,
       is_active: liveDraft.is_active !== false,
+      convert_to_elearn: convert,
+      elearn_title: convert ? liveDraft.elearn_title || liveDraft.title || "" : null,
+      elearn_score_points: convert
+        ? Number(liveDraft.elearn_score_points ?? liveDraft.score_points) || 0
+        : null,
     });
     if (!result.ok) {
       setError(result.error);
       return;
     }
     setMessage("บันทึก Live meeting แล้ว");
-    setLiveDraft({
-      title: "Live meeting",
-      youtube_url: "",
-      window_start: "",
-      window_end: "",
-      score_points: 10,
-      is_active: true,
-    });
+    setLiveDraft(emptyLiveDraft());
     await reload();
   };
 
@@ -533,7 +540,9 @@ function ActivitiesContent() {
       {tab === "live" && (
         <div className="space-y-6">
           <div className="bg-white rounded-2xl border p-6 space-y-3">
-            <h2 className="font-bold text-[var(--primary-blue)]">ตั้งค่า Live meeting</h2>
+            <h2 className="font-bold text-[var(--primary-blue)]">
+              {liveDraft.id ? "แก้ไข Live meeting" : "ตั้งค่า Live meeting"}
+            </h2>
             <input
               className={inputClass}
               placeholder="ชื่อ"
@@ -560,6 +569,7 @@ function ActivitiesContent() {
                 onChange={(e) => setLiveDraft((d) => ({ ...d, window_end: e.target.value }))}
               />
             </div>
+            <label className="block text-sm font-semibold">คะแนน Check-in</label>
             <input
               type="number"
               min={0}
@@ -567,13 +577,65 @@ function ActivitiesContent() {
               value={liveDraft.score_points ?? 0}
               onChange={(e) => setLiveDraft((d) => ({ ...d, score_points: Number(e.target.value) }))}
             />
-            <button
-              type="button"
-              onClick={() => void saveLive()}
-              className="rounded-full bg-[var(--primary-blue)] text-white px-5 py-2.5 font-bold"
-            >
-              บันทึก Live
-            </button>
+            <label className="flex items-center gap-2 text-sm font-semibold">
+              <input
+                type="checkbox"
+                checked={Boolean(liveDraft.convert_to_elearn)}
+                onChange={(e) =>
+                  setLiveDraft((d) => ({
+                    ...d,
+                    convert_to_elearn: e.target.checked,
+                    elearn_title: d.elearn_title || d.title || "",
+                    elearn_score_points:
+                      d.elearn_score_points != null ? d.elearn_score_points : Number(d.score_points) || 0,
+                  }))
+                }
+              />
+              ย้ายไป E-learning เมื่อ Live หมดเวลา
+            </label>
+            {liveDraft.convert_to_elearn && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4 space-y-3">
+                <div>
+                  <label className="block text-sm font-semibold mb-1">ชื่อวิดีโอ E-learning</label>
+                  <input
+                    className={inputClass}
+                    placeholder="ชื่อวิดีโอหลัง Live จบ"
+                    value={liveDraft.elearn_title || ""}
+                    onChange={(e) => setLiveDraft((d) => ({ ...d, elearn_title: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold mb-1">คะแนนวิดีโอ E-learning</label>
+                  <input
+                    type="number"
+                    min={0}
+                    className={inputClass}
+                    value={liveDraft.elearn_score_points ?? 0}
+                    onChange={(e) =>
+                      setLiveDraft((d) => ({ ...d, elearn_score_points: Number(e.target.value) }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void saveLive()}
+                className="rounded-full bg-[var(--primary-blue)] text-white px-5 py-2.5 font-bold"
+              >
+                บันทึก Live
+              </button>
+              {liveDraft.id && (
+                <button
+                  type="button"
+                  className="rounded-full border px-5 py-2.5 font-bold"
+                  onClick={() => setLiveDraft(emptyLiveDraft())}
+                >
+                  ยกเลิกแก้ไข
+                </button>
+              )}
+            </div>
           </div>
           <div className="bg-white rounded-2xl border divide-y">
             {lives.map((m) => {
@@ -593,19 +655,53 @@ function ActivitiesContent() {
                           ปิดใช้งาน
                         </span>
                       )}
+                      {m.convert_to_elearn && !m.converted_self_learn_id && (
+                        <span className="text-[10px] font-bold uppercase tracking-wide rounded-full bg-sky-100 text-sky-800 px-2 py-0.5">
+                          → E-learning
+                        </span>
+                      )}
+                      {m.converted_self_learn_id && (
+                        <span className="text-[10px] font-bold uppercase tracking-wide rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5">
+                          แปลงแล้ว
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-gray-500 break-all">{m.youtube_url}</div>
                   </div>
-                  <button
-                    type="button"
-                    className="text-sm font-bold text-[var(--accent-red)]"
-                    onClick={() => {
-                      if (!adminToken || !confirm("ลบ?")) return;
-                      void adminDeleteLiveMeeting(adminToken, m.id).then(() => reload());
-                    }}
-                  >
-                    ลบ
-                  </button>
+                  <div className="flex gap-3 items-start shrink-0">
+                    <button
+                      type="button"
+                      className="text-sm font-bold text-[var(--primary-blue)]"
+                      onClick={() =>
+                        setLiveDraft({
+                          id: m.id,
+                          title: m.title,
+                          youtube_url: m.youtube_url,
+                          window_start: m.window_start ? isoToDatetimeLocal(m.window_start) : "",
+                          window_end: m.window_end ? isoToDatetimeLocal(m.window_end) : "",
+                          score_points: m.score_points,
+                          is_active: m.is_active,
+                          convert_to_elearn: Boolean(m.convert_to_elearn),
+                          elearn_title: m.elearn_title || m.title || "",
+                          elearn_score_points:
+                            m.elearn_score_points != null ? m.elearn_score_points : m.score_points,
+                          converted_self_learn_id: m.converted_self_learn_id,
+                        })
+                      }
+                    >
+                      แก้ไข
+                    </button>
+                    <button
+                      type="button"
+                      className="text-sm font-bold text-[var(--accent-red)]"
+                      onClick={() => {
+                        if (!adminToken || !confirm("ลบ?")) return;
+                        void adminDeleteLiveMeeting(adminToken, m.id).then(() => reload());
+                      }}
+                    >
+                      ลบ
+                    </button>
+                  </div>
                 </div>
               );
             })}

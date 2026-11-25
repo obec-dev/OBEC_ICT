@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Candidate, ScoreRankRow } from "@/types/ict";
 import {
@@ -111,6 +111,17 @@ export function ActivityProfileHub({ candidate }: { candidate: Candidate }) {
   };
 
   const topRows = (ranking?.top ?? []).filter((r) => r.rank <= 10);
+
+  const suggestedVideos = useMemo(() => {
+    return [...selfLearn]
+      .filter((v) => !v.credited)
+      .sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return tb - ta;
+      })
+      .slice(0, 3);
+  }, [selfLearn]);
 
   return (
     <div className="space-y-8 mb-10">
@@ -256,7 +267,7 @@ export function ActivityProfileHub({ candidate }: { candidate: Candidate }) {
           </Link>
         </div>
         <div className="space-y-3">
-          {selfLearn.slice(0, 5).map((v) => (
+          {suggestedVideos.map((v) => (
             <div
               key={v.id}
               className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-50 dark:border-slate-800 px-3 py-3"
@@ -265,31 +276,22 @@ export function ActivityProfileHub({ candidate }: { candidate: Candidate }) {
                 <div className="font-semibold text-sm">{v.title}</div>
                 <div className="text-xs text-gray-500">{v.score_points} คะแนน</div>
               </div>
-              {v.credited ? (
-                <button
-                  type="button"
-                  className="rounded-full border border-emerald-600 text-emerald-700 px-4 py-1.5 text-xs font-bold"
-                  onClick={() => {
-                    const url = normalizeExternalUrl(v.video_url);
-                    if (url) window.location.assign(url);
-                  }}
-                >
-                  เปิดวิดีโออีกครั้ง
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={busy === v.id}
-                  onClick={() => void onCreditSelfLearn(v)}
-                  className="rounded-full border border-[var(--primary-blue)] text-[var(--primary-blue)] px-4 py-1.5 text-xs font-bold disabled:opacity-40"
-                >
-                  เปิดวิดีโอและรับคะแนน
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={busy === v.id}
+                onClick={() => void onCreditSelfLearn(v)}
+                className="rounded-full border border-[var(--primary-blue)] text-[var(--primary-blue)] px-4 py-1.5 text-xs font-bold disabled:opacity-40"
+              >
+                เปิดวิดีโอและรับคะแนน
+              </button>
             </div>
           ))}
-          {!selfLearn.length && (
-            <p className="text-sm text-gray-500">ยังไม่มีวิดีโอ E-learning ที่เผยแพร่</p>
+          {!suggestedVideos.length && (
+            <p className="text-sm text-gray-500">
+              {selfLearn.length
+                ? "ดูวิดีโอเพิ่มที่หน้า E-learning"
+                : "ยังไม่มีวิดีโอ E-learning ที่เผยแพร่"}
+            </p>
           )}
         </div>
       </section>

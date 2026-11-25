@@ -1328,6 +1328,15 @@ export async function adminListLiveMeetings(token: string) {
       window_end: m.window_end ? String(m.window_end) : "",
       score_points: Number(m.score_points) || 0,
       is_active: m.is_active !== false,
+      convert_to_elearn: m.convert_to_elearn === true,
+      elearn_title: m.elearn_title != null ? String(m.elearn_title) : "",
+      elearn_score_points:
+        m.elearn_score_points != null && m.elearn_score_points !== ""
+          ? Number(m.elearn_score_points)
+          : null,
+      converted_self_learn_id: m.converted_self_learn_id
+        ? String(m.converted_self_learn_id)
+        : null,
     };
   });
 }

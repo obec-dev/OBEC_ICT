@@ -20,6 +20,7 @@ export type SelfLearnVideo = {
   sort_order: number;
   is_published?: boolean;
   credited?: boolean;
+  created_at?: string;
   updated_at?: string;
 };
 
@@ -33,6 +34,7 @@ function mapVideo(raw: unknown): SelfLearnVideo {
     sort_order: Number(m.sort_order) || 0,
     is_published: m.is_published != null ? Boolean(m.is_published) : undefined,
     credited: m.credited === true,
+    created_at: m.created_at ? String(m.created_at) : undefined,
     updated_at: m.updated_at ? String(m.updated_at) : undefined,
   };
 }
